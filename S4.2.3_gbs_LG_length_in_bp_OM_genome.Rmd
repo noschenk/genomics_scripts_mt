@@ -1,0 +1,31 @@
+---
+title: "LG length in bp"
+author: 'Noëlle Schenk'
+date: "August 9, 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Get contig names to find them in fasta.fai file and add the 2nd column of the .fai file which contains contig lengths.
+
+
+Script below: run for L.1 to L.7 and record Linkage group lengths.
+```{bash}
+cat OM_geneticmap.bed | grep "L.1" | cut -f 1 | sort | uniq > search.txt
+grep -w -f search.txt /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta.fai | cut -f 2 | head | awk '{s+=$1} END {printf "%.0f", s}'
+rm search.txt
+```
+
+```{r}
+lens <- c(46083570, 34179769, 61776312, 58184792, 48860405, 50202786, 48388317)
+lensMbp <- lens / 1000000
+pdf("figures/length_of_LGs_omgenome.pdf")
+barplot(lensMbp, ylim = c(0, 70), names.arg = paste("L",seq(1,7), sep=""), sub=paste("Length of linkage groups in genome obtained from optical mapping, total:", sum(lensMbp), "Mbp", sep=" "), main="Lengths of LGs [Mbp]")
+dev.off()
+```
+
+Question : why are the linkage groups shorted if I search them on the OM genome? Because I didn't find all Contigs? (subsequences..)?

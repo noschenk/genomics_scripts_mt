@@ -1,0 +1,55 @@
+---
+title: "Caps markers to genome"
+author: 'Noëlle Schenk'
+date: "August 23, 2018"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+    <!-- pdf_document: -->
+    <!-- highlight: tango -->
+<!-- For a pretty html, install the "prettydoc" package. -->
+
+```{r, echo=FALSE}
+library(knitr)
+library(rmarkdown) #used for syntax highlighting in this document
+library(shiny)
+```
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+thm = knit_theme$get("acid")
+knit_theme$set(thm)
+```
+
+# Compare with P.axillaris caps markers (caps)
+
+Caps markers are markers which have been associated with a chromosome. Align caps to new genome version of *P. exserta* and check if scaffold-to-chromosome classification can be validated.
+
+Make database of genome for blastn.
+```{bash, eval = FALSE}
+makeblastdb -in /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.fasta -dbtype nucl -parse_seqids
+```
+
+## Blast caps marker sequences
+The script below blasts all files in the folder "path"/"chr" that end with .fa or .fasta and blasts them against the reference genome database created above. To run it for all chromosomes, the variable chr needs to be changed to "chr_1", then to "chr_2", ... This is not automated yet because the path and folder names of chromosomes could change.
+
+The blast output is in [outformat 6](http://www.metagenomics.wiki/tools/blast/blastn-output-format-6).
+```{bash, eval=F}
+path="/home/exserta/Documents/master_project_noelle/data/caps/"
+chr="chr_7"
+outpath="out_align_caps_markers/"
+for f in ${path}${chr}/*.fa*
+do
+ f=${f##*/}
+ echo "Processing ${path}${chr}/$f"
+ blastn -db /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.fasta -query ${path}${chr}/$f -out ${outpath}${chr}${f%%.*}.out -outfmt 6
+ echo "results written to ${outpath}${chr}${f%%.*}.out"
+done
+```
+
+## Analysis
+
+For marker `chr_4PM74caps`, there was no blast result.
+
+Results are documented in `resutls_align_caps_markers.ods`.

@@ -1,0 +1,274 @@
+---
+title: "translate_markers"
+author: 'Noëlle Schenk'
+date: "July 20, 2018"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+<!-- For a pretty html, install the "prettydoc" package. -->
+
+### Re-formatting data
+The downloaded data from Guo 2017 needs to be manually reformatted. The table "41598_2017_3528_MOESM4_ESM-1.xls" contains rows for bin names and their location on the map, as well as  the chromosome name. The chromosome number was inserted in the third column (named "chromosome") and all rows which did not contain information on bin name, location and chromosome were deleted. This table is referred to as "bin map" in this file.
+The file "41598_2017_3528_MOESM5_ESM.xls" was just converted to .csv. It contains the contigs and their classification to bins. It is referred to as "contigs-to-bin-table" here.
+
+Reading in data and loading required modules.
+```{r}
+require(data.table)
+# read in contigs-to-bin-table
+scguo <- read.csv("41598_2017_3528_MOESM5_ESM.csv")
+names(scguo)[1] <- "bin"
+head(scguo)
+```
+The contigs-to-bin-table contains `r length(unique(scguo$bin)) # 330` unique bins.
+```{r}
+# load bin map
+binguo <- read.csv("41598_2017_3528_MOESM4_ESM.csv")
+binguo$bin <- as.character(binguo$bin)
+head(binguo)
+```
+The bin map contains `r length(unique(binguo$bin)) # 368` unique bins. There are more bins in the bin map than in the contigs-to-bin-table because some bins were splitted. 
+
+In the bin map, there are for example 2 bins named "AE_bin88_525_28_1" and "AE_bin88_525_28_2". These bin maps are not found in the contig to bin table, but there is a bin named "AE_bin88_525". AE_bin88_525 was splitted to 28_1 and 28_2. For example, there are `r length(which(scguo$bin == "AE_bin88_525")) #525` Contigs with the bin name "AE_bin88_525".
+
+Some bin names from the bin map do not occurr in the Contig list, not even a part of their name. Those bins will be excluded. TODO:how many?
+
+According to Guo2017, the bins in the bin linkage map were splitted in case there was a marker within one bin that was NA. For now, the splitted bins are just merged together again, as I can not reconstruct the order in the contigs-to-bin-table. The order in the table does not seem to be the one in the genetic map. E.g. the bin "AE_bin88_525" contains at least 3 times "Peaxi162Scf01050", but not in a row but separated by other contigs.
+
+The splitted bins have a different genetic distance, therefore for the merged bins, the average of the distances is taken.
+```{r}
+# solve the bin splitting problem
+splitted_bins <- unique(binguo$bin[!unique(binguo$bin) %in% unique(scguo$bin)]) # bin names from the bin map not present in the contig-to-bin-table
+
+replaced <- data.frame("binguoname" = NA, "shortname" = NA)
+for(i in splitted_bins){
+  ctgs <- scguo$bin[grep(sub("_[0-9]{1,4}_[0-9]{1,3}$", "", i, perl=T), scguo$bin)]
+  shortname <- as.character(as.character(ctgs[1]))
+  sbins <- splitted_bins[grep(shortname, splitted_bins)]
+  if(length(ctgs) >= 1 && length(unique(ctgs)) == 1){
+    # check ob alle contigs gleich heissen
+    # print(paste("will substitute", i, "with",scguo$bin[ctgs][1]))
+    replaced <- rbind(replaced, c("binguoname" = i, "shortname" = shortname))
+    binguo$bin[which(binguo$bin %in% sbins)] <- rep(shortname, length(binguo$bin[which(binguo$bin %in% sbins)]))
+    # the merged bins need to get the same genetic distance, the mean of all the subbins is taken
+    binguo[which(binguo$bin == shortname),"location"] <- mean(binguo[which(binguo$bin == shortname),"location"])
+  }}
+rm(i); rm(ctgs); rm(sbins); rm(shortname); rm(splitted_bins); gc()
+# check if there are some bins left which do not have scaffolds yet
+if(length(binguo$bin[!binguo$bin %in% scguo$bin]) != 0){print("There are still some bins in bin map which need to be associated with their corresponding unsplitted name from the contig-to-bin-table. This will be done by hand")}
+# AE_bin210_117_218_4_2_2 in binmap most probably is AE_bin210_117 from the contig-to-bin-map
+# this is converted by hand (rename and change genetic distance to mean of genetic distance of all subbins)
+binguo$bin[grep("AE_bin210_117",binguo$bin)] <- "AE_bin210_117"
+binguo[grep("AE_bin210_117",binguo$bin),"location"] <- mean(binguo[grep("AE_bin210_117",binguo$bin),"location"])
+# same for AE_bin301_62
+binguo$bin[grep("AE_bin301_62",binguo$bin)] <- "AE_bin301_62"
+binguo[grep("AE_bin301_62",binguo$bin),"location"] <- mean(binguo[grep("AE_bin301_62",binguo$bin),"location"])
+# 259_236_46_42_... stays. Could it refer to AE_bin259_236? There is no occurrence of this in binguo$bin, so it is assumed
+binguo$bin[grep("259_236",binguo$bin)] <- "AE_bin259_236"
+binguo[grep("259_236",binguo$bin),"location"] <- mean(binguo[grep("259_236",binguo$bin),"location"])
+if(length(binguo$bin[!binguo$bin %in% scguo$bin]) == 0){print("all bins from the bin map can be found in the contig-to-bin-table now.")}
+
+# combine the two tables by bin name
+guo <- merge(binguo, scguo, by="bin")
+# take out double rows
+guo <- unique(guo)
+
+# check for duplicated rows
+guo[, "new"] = paste(guo$PhyChr,":",guo$PhyPos,sep="")
+guo$new[duplicated(guo$new)]
+if(length(guo$new[duplicated(guo$new)]) == 0){print("there are not more duplicated rows in the merged dataset.")}
+```
+The merged dataset contains `r nrow(guo) # 6291` unique markers. Guo 2017 reported 6291. It is `r nrow(guo) == 6291 # True?` that the numbers are the same.
+
+The splitted bins are merged now, the genetic distance of the merged bins is the average of the sub bins.
+
+## locations from axillaris genome
+Read out the locations from *P.axillaris* reference genome.
+```{r}
+rm(scguo); rm(binguo); rm(replaced); gc()
+guo[,"new"] <- NULL
+halflength <- 100
+guo[,"snppos"] <- halflength + 1
+guo[,"locstart"] <- guo[,"PhyPos"] - halflength
+guo[,"locend"] <- guo[,"PhyPos"] + halflength + 1
+# starting position can never be smaller than 0. Convert all negative values to 0 - there are no negative values
+# which(guo[, "locstart"] < 1)
+rm(halflength); gc()
+```
+Generate the bash file for reading out positions.
+```{r}
+bashinput <- paste("samtools faidx /home/exserta/Documents/master_project_noelle/data/axillaris_genome_NGS/Peaxi_genome_v1.6.2.scaffolds.fasta", paste(paste(guo$PhyChr, guo$locstart, sep = ":"), guo$locend, sep="-"), ">> deleteme.fasta",sep=" ")
+guo[,"inp"] <- paste(paste(guo$PhyChr, guo$locstart, sep = ":"), guo$locend, sep="-")
+write(bashinput, "find_marker_sequences.sh")
+rm(bashinput); gc()
+```
+Run bash script which creates a new fasta file containing sequences for all markers.
+```{bash, eval=F}
+chmod u+x find_marker_sequences.sh
+./find_marker_sequences.sh
+cat deleteme.fasta | awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' > marker_seqs.fasta
+rm deletme.fasta
+```
+
+## Blast marker sequences in *P.exserta* genome
+To find the corresponding *P. exserta* marker names and positions, the sequences of the *P. axillaris* markers are blasted against the *P. exserta* genome.
+
+The *P. exserta* genome from Bionano is used, to work with superscaffolds from now on.
+
+```{bash, eval=F}
+# if not already there, generate index for the fasta file
+# makeblastdb -in P.exserta.opticalmap.v1.fasta -dbtype nucl -parse_seqids
+blastn -db /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta -query marker_seqs.fasta -out results.out -outfmt 6 -perc_identity 80
+```
+The position of the SNPs is not detected here. To find it out, the alignment can be printed out in another format (not table).
+
+Read and further process in R
+```{r}
+blast <- fread("results.out", sep="\t")
+names(blast) <- c("query_id", "subject_id", "%_identity", "alignment_length", "mismatches", "gap_opens", "q.start", "q.end", "s.start", "s.end", "evalue", "bit_score")
+```
+From Guo 2017 (p.9): "Because the *P.axillaris* accession used for RIL population was not the same genotype as the reference genome, the genotyping data from D2B were further corrected based on the consistency of the parental genotypes and the progeny. Briefly, for loci where he genotype of the parental line *p.axillaris* was different than the reference *P.axillaris* genome, the genotypes of the entire population was switched to the other genotpye." 
+This is interpreted to imply "switched to the *P.exserta* genotype" in this script
+
+Not all the markers were found in the *P.exserta* genome, `r nrow(guo[which(guo$inp %in% blast$query_id),]) # 6279` were found and `r nrow(guo[which(!guo$inp %in% blast$query_id),]) # 12` markers were not found. Those markers are : `r guo[which(!guo$inp %in% blast$query_id),"inp"]`. They are from chromosomes 2,3,4,6 and 7, no systematic error is suspected here, therefore these markers will be deleted from the map.
+```{r}
+guo <- guo[which(guo$inp %in% blast$query_id),]
+```
+
+Number of unique mappings : `r sum(!blast$query_id %in% blast$query_id[duplicated(blast$query_id)]) # 2539`, of `r nrow(guo) # 6279`
+
+Number of non-unique mappings : `r sum(blast$query_id %in% blast$query_id[duplicated(blast$query_id)]) # 890650` total, of `r nrow(unique(blast[duplicated(blast$query_id),"query_id"])) #3740` markers in total. 
+
+## Duplicate Contigs
+(not needed to be run for script to run)
+```{r, eval=F}
+dups <- as.vector(unique(blast[duplicated(blast$query_id),"query_id"]))
+# Test in how many cases there are two identical matches, one in the not scaffolded one and one in the scaffolded part
+counter <- 0
+duplicate_suspects <- blast[1,] ; duplicate_suspects <- duplicate_suspects[-1, ]
+for(i in dups$query_id){
+  # every duplicated value is searched in the blast results
+  # only the best match is taken.
+  a <- blast[which(blast$query_id == i), ]
+  a <- a[1:2,]
+  if(length(unique(a$`%_identity`)) == 1 & length(unique(a$alignment_length)) == 1 & length(unique(a$mismatches)) == 1 & length(unique(a$gap_opens)) == 1 & length(unique(a$q.start)) == 1 & length(unique(a$q.end)) == 1 & length(grep("Peex", a$subject_id)) == 1 & length(grep("Super", a$subject_id)) == 1){
+    counter = counter + 1
+    duplicate_suspects <- rbind(duplicate_suspects, a)
+  }
+}
+saveRDS(duplicate_suspects, file="duplicate_suspects.RDS")
+```
+```{r}
+duplicate_suspects <- readRDS("duplicate_suspects.RDS")
+```
+
+For some of the non-unique blast matches, there were two identical matches, one from a not scaffolded Contig, the other from a scaffolded Super-Scaffold. This indicates duplicate Contigs. There were `r length(unique(duplicate_suspects$query_id))` such cases of total `r nrow(as.vector(unique(blast[duplicated(blast$query_id),"query_id"]))) #3740` non-unique blast matches from a total of `r nrow(guo) #6279` markers. Some of these matches are matching quite well such that restrictive tresholds would not remove them.
+
+For all duplicate suspects, the alignment to the Super-Scaffold is taken. A further investigation can be performed with the script `contigs_to_scaffolds.Rmd`.
+
+The unique matches from blast are kept.
+
+```{r}
+# subsets from blast (6279 markers) to keep
+dup_keep <- duplicate_suspects[grep("Super", duplicate_suspects$subject_id),]
+unique_matches <- blast[!blast$query_id %in% blast$query_id[duplicated(blast$query_id)],]
+```
+
+For cases in which there are various matches, the best one is kept. (These are the non-unique matches without the 135 cases with equal matches.) The matches are filtered with different tresholds, the best is chosen among the alignments that passed this treshold.
+
+```{r}
+nonunique_matches <- blast[blast$query_id %in% blast$query_id[duplicated(blast$query_id)],]
+# There are 3740 non-unique matches. The 135 duplicates need to be deleted from this lsit:
+nonunique_matches <- nonunique_matches[!which(nonunique_matches$query_id %in% dup_keep$query_id),]
+# There should be 3740 - 135 = 3605 unique markers left
+#length(unique(nonunique_matches$query_id)) # 3605
+```
+
+## Quality filtering
+Merge the three subsets of markers to get the highest quality markers out.
+```{r}
+qc_set <- rbind(dup_keep, nonunique_matches, unique_matches)
+```
+The merged dataset contains `r length(unique(qc_set$query_id)) #6279` unique markers and `r nrow(qc_set)` entries to be filtered.
+
+```{r}
+# Filtering for quality function
+quality_filter_blast <- function(hits, tresholds=c(98, 195, 6, 0.01, 214)){
+  # Function to quality-filter blast hits. 
+  # Inputs : data frame "hits" with blast hits, required columns are : c("query_id", "subject_id", "identity", "alignm_len", "n_mismatches", "evalue", "bit_score")
+  #    e.g. : query_id, subject_id, %_identity, alignment_length, mismatches, gap_opens, q.start, q.end, s.start, s.end, evalue, bit_score
+  #    vector of  tresholds, default is c(98, 195, 6, 0.01, 214) : "identity", "alignm_len", "n_mismatches", "evalue", "bit_score"
+  # Output : data frame with only filtered hits, in the same format as hits.
+  #    data frame with hits to check again, if something is not as expected.
+  names(tresholds) <- c("identity", "alignm_len", "n_mismatches", "evalue", "bit_score")
+  keep <- list() ; keep_long <- data.frame(hits[1,]) ; keep_long[1, ] <- rep(NA, ncol(keep_long))
+  check_again <- data.frame(hits[1,]) ; check_again[1, ] <- rep(NA, ncol(check_again))
+  names(keep_long)[3] <- "%_identity" ; names(check_again)[3] <- "%_identity"
+  
+  for(i in unique(hits$query_id)){
+    # every duplicated value is searched in the blast results
+    # only the best match is taken.
+    a <- hits[which(hits$query_id == i), ]
+    one <- which(a$`%_identity` >= tresholds["identity"])
+    two <- which(a$alignment_length > tresholds["alignm_len"])
+    three <- which(a$mismatches < tresholds["n_mismatches"])
+    four <- which(a$evalue < tresholds["evalue"])
+    five <- which(a$bit_score > tresholds["bit_score"])
+  
+    # if the tresholds are not met, ignore the match and go to the next match. else, keep it.
+    if(length(one) == 0 | length(two) == 0 | length(three) == 0 | length(four) == 0 | length(five) == 0) {next} else{
+      
+    keep[[i]] <- Reduce(intersect, list(one,two,three, four, five))
+    if(length(keep[[i]]) > 1){
+      # there is more than one best match
+      # check if there is a Superscaffold and a Contig in the best matches
+      if((length(grep("Super", a[keep[[i]], "subject_id"])) > 1) & (length(grep("Peex", a[keep[[i]], "subject_id"])) > 1)){
+        check_again <- rbind(check_again, a[keep[[i]],])
+        print(c(i, "check again"))
+      } else {
+      # if there is not a superscaffold and a contig in the best match, the best match is taken (by chance).
+      keep_long <- rbind(keep_long, a[keep[[i]][1],])
+      }
+    } else {
+    # there is only one best match
+    keep_long <- rbind(keep_long, a[keep[[i]],])
+    }
+    }
+  }
+  rm(a); rm(i); rm(one); rm(two); rm(three); rm(four); rm(five)
+  # delete the first row, as it was added to create the data.frame quickly
+  keep_long <- keep_long[-1,] ; check_again <- check_again[-1,]
+  res <- list("filtered_hits" = keep_long, "check_again" = check_again)
+  return(res)
+}
+```
+tresholds are : "identity", "alignm_len", "n_mismatches", "evalue", "bit_score"
+
+evalue = 0.01 ; bit score = 214
+
+  tresholds        n° blast matches accepted       
+---------------  -------------------------------
+no treshold                  6279
+96, 190, 8                   5488
+**97, 195, 7**             **5145**
+96, 195, 6                   5051
+97, 193, 6                   4990
+98, 193, 7                   4517
+99, 199, 5                   3066
+
+```{r}
+a <- quality_filter_blast(qc_set, tresholds = c(97, 195, 7, 0.01, 214))
+guo_ex <- a$filtered_hits
+```
+There are `r length(a$filtered_hits$query_id) #5145` markers left of the originally reported 6291 markers. 
+
+Translate names of markers to the names they have on the optical mapping genome. Bring into .bed format ready for `ALLMAPS`.
+```{r}
+names(guo_ex)[1] <- "inp"
+translated_map <- merge(guo_ex, guo, by="inp")
+translated_map <- cbind(translated_map$subject_id, translated_map$s.start + translated_map$snppos, translated_map$s.start + translated_map$snppos + 1, paste(paste("G",translated_map$chromosome, sep=""), translated_map$location, sep=":"))
+write.table(translated_map, "guo2017_translated.bed", quote=F, sep="\t", row.names = F, col.names = F)
+```
+
+The linkage groups are named G1 to G7 ("Guo1 - Guo7"). The bins are not written to the .bed file, as the information is given by co-located markers.

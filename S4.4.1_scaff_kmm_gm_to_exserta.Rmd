@@ -1,0 +1,216 @@
+---
+title: "kmm_to_exserta"
+author: 'Noëlle Schenk'
+date: "August 6, 2018"
+output: html_document
+---
+Translate the map from michel to the exserta genome. Adapt from script `translate_markers.Rmd`
+
+## Read out marker sequences from P.axillaris
+```{r}
+require(data.table); library(knitr)
+kmm <- read.table("/home/exserta/Documents/master_project_noelle/data/kmm_geneticmap/F7_V3.bed")
+names(kmm) <- c("markername", "start", "stop", "gmpos")
+halflength <- 100
+kmm["seq_start"] <- kmm$start - halflength
+kmm["seq_stop"] <- kmm$stop + halflength
+# position of marker at  101
+```
+
+Create bash commands file
+```{r}
+bashinput <- paste("samtools faidx /home/exserta/Documents/master_project_noelle/data/axillaris_genome_NGS/Peaxi_genome_v1.6.2.scaffolds.fasta", paste(paste(kmm$markername, kmm$seq_start, sep = ":"), kmm$seq_stop, sep="-"), ">> deleteme.fasta",sep=" ")
+# change first line of bashinput, so the file deleteme.fasta is always created newly
+bashinput[1] <- paste("samtools faidx /home/exserta/Documents/master_project_noelle/data/axillaris_genome_NGS/Peaxi_genome_v1.6.2.scaffolds.fasta", paste(paste(kmm$markername[1], kmm$seq_start[1], sep = ":"), kmm$seq_stop[1], sep="-"), "> deleteme.fasta",sep=" ")
+write(bashinput, "find_marker_sequences.sh")
+kmm["inp"] <- paste(paste(kmm$markername, kmm$seq_start, sep = ":"), kmm$seq_stop, sep="-")
+```
+
+Run bash script which creates a new fasta file containing sequences for all markers.
+```{bash, eval=F}
+chmod u+x find_marker_sequences.sh
+./find_marker_sequences.sh
+cat deleteme.fasta | awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' > marker_seqs.fasta
+rm deleteme.fasta
+```
+
+## Blast marker sequences in P.exserta genome
+```{bash, eval=F}
+# if not already there, generate index for the fasta file
+# makeblastdb -in P.exserta.opticalmap.v1.fasta -dbtype nucl -parse_seqids
+blastn -db /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta -query marker_seqs.fasta -out results.out -outfmt 6 -perc_identity 80
+```
+
+```{r}
+blast <- fread("results.out", sep="\t")
+names(blast) <- c("query_id", "subject_id", "%_identity", "alignment_length", "mismatches", "gap_opens", "q.start", "q.end", "s.start", "s.end", "evalue", "bit_score")
+```
+
+There are 1836 markers in the original map. Blasting them in exserta resulted in 1825 markers (`r length(which(kmm$inp %in% unique(blast$query_id)))` markers from the map are found in the blast results.) `r length(which(!kmm$inp %in% unique(blast$query_id))) # 11` markers are not found, these are : 
+```{r echo=F, results="asis"}
+kmm[which(!kmm$inp %in% unique(blast$query_id)),]
+```
+Delete these 11 markers from the map.
+```{r}
+kmm <- kmm[which(kmm$inp %in% unique(blast$query_id)),]
+```
+Number of unique blast hits : `r sum(!blast$query_id %in% blast$query_id[duplicated(blast$query_id)]) # 1328`
+
+Number of markers with more than one hit : `r length(unique(blast$query_id[duplicated(blast$query_id)])) # 497`, a total of `r length(blast$query_id[duplicated(blast$query_id)]) #1247` blast matches were found.
+
+```{r}
+# store unique blast hits in separate variable
+blast_unique <- blast[!blast$query_id %in% blast$query_id[duplicated(blast$query_id)],]
+blast_dups <-  blast[which(blast$query_id %in% unique(blast$query_id[duplicated(blast$query_id)])),]
+```
+
+## Filtering blast results
+```{r}
+# Test in how many cases there are two identical matches, one in the not scaffolded one and one in the scaffolded part
+counter <- 0
+duplicate_suspects <- blast[1,] ; duplicate_suspects <- duplicate_suspects[-1, ]
+for(i in unique(blast_dups$query_id)){
+  # every duplicated value is searched in the blast results
+  # only the best match is taken.
+  a <- blast[which(blast$query_id == i), ]
+  a <- a[1:2,]
+  if(length(unique(a$`%_identity`)) == 1 & length(unique(a$alignment_length)) == 1 & length(unique(a$mismatches)) == 1 & length(unique(a$gap_opens)) == 1 & length(unique(a$q.start)) == 1 & length(unique(a$q.end)) == 1 & length(grep("Peex", a$subject_id)) == 1 & length(grep("Super", a$subject_id)) == 1){
+    counter = counter + 1
+    duplicate_suspects <- rbind(duplicate_suspects, a)
+  }
+}
+duplicate_suspects <- unique(duplicate_suspects)
+```
+There are `r length(unique(duplicate_suspects$query_id)) #57` cases where duplicate contigs are possible.
+
+For all duplicate suspects, the alignment to the Super-Scaffold is taken. 
+
+```{r}
+# save the duplicate suspects out of blast_dups and store then in different variable
+blast_dupsuspects_keep <- duplicate_suspects[grep("Super", duplicate_suspects$subject_id),]
+blast_dups <- blast_dups[which(!blast_dups$query_id %in% blast_dupsuspects_keep$query_id),]
+```
+
+### Quality filtering
+The blast matches are filtered for quality. The three subsets  are therefore merged.
+
+```{r echo=FALSE}
+# Get function from script translate_markers.Rmd
+quality_filter_blast <- function(hits, tresholds=c(98, 195, 6, 0.01, 214)){
+  # Function to quality-filter blast hits. 
+  # Inputs : data frame "hits" with blast hits, required columns are : c("query_id", "subject_id", "identity", "alignm_len", "n_mismatches", "evalue", "bit_score")
+  #    e.g. : query_id, subject_id, %_identity, alignment_length, mismatches, gap_opens, q.start, q.end, s.start, s.end, evalue, bit_score
+  #    vector of  tresholds, default is c(98, 195, 6, 0.01, 214) : "identity", "alignm_len", "n_mismatches", "evalue", "bit_score"
+  # Output : data frame with only filtered hits, in the same format as hits.
+  #    data frame with hits to check again, if something is not as expected.
+  names(tresholds) <- c("identity", "alignm_len", "n_mismatches", "evalue", "bit_score")
+  keep <- list() ; keep_long <- data.frame(hits[1,]) ; keep_long[1, ] <- rep(NA, ncol(keep_long))
+  check_again <- data.frame(hits[1,]) ; check_again[1, ] <- rep(NA, ncol(check_again))
+  names(keep_long)[3] <- "%_identity" ; names(check_again)[3] <- "%_identity"
+  
+  for(i in unique(hits$query_id)){
+    # every duplicated value is searched in the blast results
+    # only the best match is taken.
+    a <- hits[which(hits$query_id == i), ]
+    one <- which(a$`%_identity` >= tresholds["identity"])
+    two <- which(a$alignment_length > tresholds["alignm_len"])
+    three <- which(a$mismatches < tresholds["n_mismatches"])
+    four <- which(a$evalue < tresholds["evalue"])
+    five <- which(a$bit_score > tresholds["bit_score"])
+  
+    # if the tresholds are not met, ignore the match and go to the next match. else, keep it.
+    if(length(one) == 0 | length(two) == 0 | length(three) == 0 | length(four) == 0 | length(five) == 0) {next} else{
+      
+    keep[[i]] <- Reduce(intersect, list(one,two,three, four, five))
+    if(length(keep[[i]]) > 1){
+      # there is more than one best match
+      # check if there is a Superscaffold and a Contig in the best matches
+      if((length(grep("Super", a[keep[[i]], "subject_id"])) > 1) & (length(grep("Peex", a[keep[[i]], "subject_id"])) > 1)){
+        check_again <- rbind(check_again, a[keep[[i]],])
+        print(c(i, "check again"))
+      } else {
+      # if there is not a superscaffold and a contig in the best match, the best match is taken (by chance).
+      keep_long <- rbind(keep_long, a[keep[[i]][1],])
+      }
+    } else {
+    # there is only one best match
+    keep_long <- rbind(keep_long, a[keep[[i]],])
+    }
+    }
+  }
+  rm(a); rm(i); rm(one); rm(two); rm(three); rm(four); rm(five)
+  # delete the first row, as it was added to create the data.frame quickly
+  keep_long <- keep_long[-1,] ; check_again <- check_again[-1,]
+  res <- list("filtered_hits" = keep_long, "check_again" = check_again)
+  return(res)
+}
+```
+
+```{r}
+# merge subsets
+qc_set <- rbind(blast_dups, blast_unique, blast_dupsuspects_keep)
+# quality filter
+b <- quality_filter_blast(qc_set, tresholds = c(97, 195, 7, 0.01, 214))
+#length(unique(b$filtered_hits$query_id))
+filtered <- b$filtered_hits
+```
+tresholds are : "identity", "alignm_len", "n_mismatches", "evalue", "bit_score"
+
+evalue = 0.01 ; bit score = 214
+
+  tresholds        n° blast matches accepted       
+---------------  -------------------------------
+no treshold                  1825
+97, 188, 7                   1285
+97, 190, 7                   1281
+97, 190, 8                   1281
+96, 190, 6                   1270
+96, 195, 6                   1263
+**97, 195, 7**             **1277**
+97, 193, 6                   1223
+97, 195, 6                   1221
+97.5, 195, 7                 1172
+98, 190, 6                   1018
+98, 193, 7                   1016
+98, 195, 6                   1015
+99, 193, 6                   628
+99, 199, 5                   626
+
+With the given treshold, `r length(unique(b$filtered_hits$query_id)) #1277` markers are found. 
+
+Get marker position from blast results and save.
+
+Some sequences have - orientation. As the only important is the SNP, this can be ignored.
+```{r}
+kmm <- kmm[which(kmm$inp %in% filtered$query_id),]
+names(filtered)[1] <- "inp"
+kmm_ex <- merge(kmm, filtered, by = "inp")
+kmm_ex <- kmm_ex[c("inp", "gmpos", "subject_id", "q.start", "q.end", "s.start", "s.end")]
+# approx. half of the sequences are oriented in the other direction.
+change_orient <- kmm_ex[which(kmm_ex$s.end - kmm_ex$s.start < 0),]
+orient_ok <- kmm_ex[which(!kmm_ex$s.end - kmm_ex$s.start < 0),]
+rm(kmm_ex)
+names(change_orient) <- c("inp", "gmpos", "subject_id", "q.start", "q.end", "s.end", "s.start")
+kmm_ex <- rbind(orient_ok, change_orient)
+
+kmm_ex["newstart"] <- kmm_ex$s.start + 101 - kmm_ex$q.start
+kmm_ex["newstop"] <- kmm_ex$newstart + 1
+
+kmm_bed <- kmm_ex[c("subject_id", "newstart", "newstop", "gmpos")]
+write.table(kmm_bed, file="F7AE_Kmm.bed", sep="\t", quote=F, row.names = F, col.names = F)
+```
+
+## Store marker sequences
+The marker sequences are read out from the *P. exserta* genome, not from the *P. axillaris*.
+```{r}
+bashinput <- paste("samtools faidx /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta", paste(paste(kmm_bed$subject_id, kmm_bed$newstart - halflength, sep = ":"), kmm_bed$newstop + halflength, sep="-"), ">> deleteme.fasta",sep=" ")
+write(bashinput, "find_marker_sequences_ex.sh")
+```
+
+Run bash script which creates a new fasta file containing sequences for all markers.
+```{bash, eval=F}
+chmod u+x find_marker_sequences_ex.sh
+./find_marker_sequences_ex.sh
+cat deleteme.fasta | awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' > marker_seqs_ex.fasta
+rm deleteme.fasta
+```

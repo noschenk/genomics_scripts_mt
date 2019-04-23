@@ -1,0 +1,99 @@
+---
+title: "compare maps"
+author: 'Noëlle Schenk'
+date: "August 9, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Michel wrote:
+Collinearity between the two maps was tested by comparing identical marker positions from both maps
+
+## Collinearity
+based on .bed files
+
+"new" map, constructed with PeexOM genome : /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/2GBS_LebMAP3_ASMap/output_map/F7KAE_Kns.bed
+
+"old" map, constr. on Peexv113 genome and translated to OM genome: /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3/output_map/OM_geneticmap.bed
+```{r}
+require(ggparallel)
+```
+
+
+```{r}
+kmm <- read.table("F7AE_Kmm.bed")
+kns <- read.table("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/2GBS_LebMAP3_ASMap/output_map/F7KAE_Kns.bed")
+#kns <- read.table("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3/output_map/OM_geneticmap.bed")
+
+
+kmm["fullname"] <- paste(paste(kmm$V1, kmm$V2, sep=":"), kmm$V3, sep="-")
+kns["fullname"] <- paste(paste(kns$V1, kns$V2, sep=":"), kns$V3, sep="-")
+length(which(kns$fullname %in% kmm$fullname))
+a <- kns[which(kns$fullname %in% kmm$fullname), ]
+b <- kmm[which(kmm$fullname %in% kns$fullname),]
+c <- merge(a, b, by="fullname")
+d <- c[c("fullname", "V4.x", "V4.y")]
+
+d1 <- data.frame(do.call('rbind', strsplit(as.character(d$V4.x),':',fixed=TRUE)))
+d2 <-  data.frame(do.call('rbind', strsplit(as.character(d$V4.y),':',fixed=TRUE)))
+dd <- cbind(d1, d2)
+names(dd) <- c("gm1lg", "gm1pos", "gm2lg", "gm2pos")
+
+ggparallel(list("gm1lg", "gm2lg"), dd)
+colin_plot <- recordPlot()
+```
+```{r, eval=F}
+# store plot
+pdf("kmm_kns_bedfile_parallelplot.pdf")
+colin_plot
+dev.off()
+```
+
+
+# Rqtl comparison
+tr.txt contained a list of old_name=new_name, names.txt contained the first row of .csv file where the marker names are stored. This first line was manually exchanged with new.txt
+```{bash}
+sed -e 's/^/s%/' -e 's/=/%/' -e 's/$/%g/' tests/tr.txt |
+sed -f - tests/names.txt > tests/new.txt
+```
+
+```{r}
+library(qtl2)
+library(ASMap)
+```
+```{r}
+# kmm <- read.cross(file="/home/exserta/Documents/master_project_noelle/data/kmm_geneticmap/F7_V3.map.csv", format="csv")
+kmm <- read.cross(file="/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/kns_to_kmm_geneticmaps/tests/new.csv", format="csv")
+kns <- read.cross(file="/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/2GBS_LebMAP3_ASMap/results/geneticmap2.csv", format="csv")
+
+```
+
+
+wie kann ich maps vergleichen, die nicht auf gleichem genom konstruiert wurden?
+marker names übersetzen
+
+
+Pax nach PexOM
+
+
+ [976] "Super.Scaffold_11019_205566"  "Super.Scaffold_11019_205540"  "Super.Scaffold_11019_45894"   "Super.Scaffold_11019_149094"  "Super.Scaffold_11019_149221" 
+ [981] "Super.Scaffold_11019_149095"  "Super.Scaffold_11019_149098"  "Super.Scaffold_11019_149099"  "Super.Scaffold_11019_149102"  "Super.Scaffold_11019_149214" 
+ [986] "Super.Scaffold_11019_149239"  "Super.Scaffold_11019_45893"   "Super.Scaffold_11019_45845"   "Super.Scaffold_11019_45836"   "Super.Scaffold_13920_2182528"
+ [991] "Super.Scaffold_13920_2182530" "Super.Scaffold_12246_1069942" "Super.Scaffold_13903_1160005" "Super.Scaffold_13920_468871"  "Super.Scaffold_13889_2389421"
+ [996] "Super.Scaffold_12246_1069855" "Super.Scaffold_12200_602716"  "Super.Scaffold_12200_699307"  "Super.Scaffold_12200_699339"  "Super.Scaffold_12200_906446" 
+ [ reached getOption("max.print") -- omitted 23 entries ]
+> head(markernames(kmm))
+[1] "Peaxi162Scf00207_1492281" "Super-Scaffold_13931"     "Super-Scaffold_13931"     "Super-Scaffold_13931"     "Super-Scaffold_13931"     "Super-Scaffold_13931" 
+
+```{r}
+data(mapDH, package = "ASMap")
+
+chrl <- sample(c(TRUE,FALSE), 23, replace = TRUE)
+mapDH1 <- subset(mapDH, chr = chrl)
+alignCross(mapDH, maps = list(DH = mapDH1), layout = c(3,5), col = 1:7)
+
+```
+

@@ -1,0 +1,133 @@
+---
+title: "Transfer Annotations"
+author: 'Noëlle Schenk'
+date: "August 23, 2018"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+# Transfer Annotation
+This script documents a workflow to tranfer an annotation in .gff format to a new version of a genome using `liftOver` from [jcvi ALLMAPS](https://github.com/tanghaibao/jcvi/wiki/ALLMAPS%3A-How-to-lift-over-gene-annotations).
+
+## workflow
+The annotation is available for genome1 (P.exserta.v.1.1.3) and should be transfered to genome4 (P.exserta.v.2.0). 
+
+|                       | P.exserta.v.1.1.3     |  PeexOM                | PeexOMv1               | Peexv2.0               |
+| --------------------- | --------------------- |  --------------------- |  --------------------- |  --------------------- |
+|                       | .gff with annotation  |                        |                        | need .gff with annotation |
+|                       | .chain available      | NO CHAIN available     | .chain available       | .chain available       |
+
+If the annotation is given in .gff format, it can be converted to the next version of a genome easily (with liftOver) if a .chain file is available. For "PeexOM" (the raw output from Bionano exserta), only .agp is given.
+
+Therefore, .agp needs to be converted to .gff first.
+
+### .agp with original names
+In Bionano exserta data, the Contigs are referred to by short names. They need to be changed back to original names to further process the .agp file with ALLMAPS. The script below changes the format of subsequences and writes a \*_improved.agp file to the same location as \*.agp
+```{python, eval=F}
+import pandas as pd
+import numpy as np
+data = pd.read_table("/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD.agp", header=7) # my header was 8 rows, It is not needed for conversion
+data.head()
+names = pd.read_table("/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.EXSERTA.contigs.v1.1.3_GCTCTTC_0kb_0labels_key.txt", header=3)
+names.head()
+# Filter out the rows which contain subsequences. The other rows are OK
+subseq = data[data['CompntId_GapLength'].str.contains("subseq")]
+# split column "CompntId_GapLength" by ':' and '_subseq_'
+subseq[['tosplit', 'CompntEnd']] = subseq['CompntId_GapLength'].str.split(':', 1, expand=True)
+subseq[['CompntId', 'CompntStart']] = subseq['tosplit'].str.split('_subseq_', 1, expand=True)
+subseq.head()
+# drop unnecessary columns
+subseq = subseq.drop(['CompntId_GapLength', 'CompntStart_GapType', 'CompntEnd_Linkage', 'tosplit'], axis=1)
+subseq.head()
+# rename columns to original names
+# convert all (new) columns to strings
+subseq = subseq.rename(index=str,columns={subseq.columns[7] : 'CompntId_GapLength'})
+subseq[['CompntId_GapLength']].astype(str)
+subseq = subseq.rename(index=str,columns={subseq.columns[8] : 'CompntStart_GapType'})
+subseq[['CompntStart_GapType']].astype(str)
+subseq = subseq.rename(index=str,columns={subseq.columns[6] : 'CompntEnd_Linkage'})
+subseq[['CompntEnd_Linkage']].astype(str)
+subseq.head()
+# bring columns into required column order
+subseq = subseq[['# Obj_Name', 'Obj_Start', 'Obj_End', 'PartNum', 'Compnt_Type', 'CompntId_GapLength', 'CompntStart_GapType', 'CompntEnd_Linkage',
+       'Orientation_LinkageEvidence']]
+subseq.head()
+# store the new subseq rows instead of the old ones
+data = data.loc[~data.CompntId_GapLength.str.contains("subseq")]
+data = data.append(subseq)
+data.tail()
+# sort by # Obj_Name
+data = data.sort_values(by=['# Obj_Name', 'Obj_Start'])
+data.to_csv('/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD_improved.agp', sep='\t', header=False, index=False)
+```
+
+### .agp to .gff
+The annotation from P.exserta.v.1.1.3 can only be transferred to PeexOM with a .chain file. This can easily be created with `jcvi`.
+```{bash, eval=F}
+python -m jcvi.formats.chain fromagp /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD_improved.agp /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.fasta /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta
+```
+The output is written to `/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD_improved.chain`. 
+
+
+## transfer annotation 
+
+### from P.exserta.v.1.1.3 to PeexOM
+Description of input files (directly from wiki of liftOver) with corresponding path and file names.
+
+    scaffold.gff3: scaffold annotations (INPUT): "/home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.annotation.v1.GFF"
+    scaffold_to_genome.chain: translations (INPUT): "/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD_improved.chain"
+    genome.gff3: genome annotations (OUTPUT)
+    unmapped: things that fail (OUTPUT)
+
+Transferring annotation
+```{bash, eval=F}
+liftOver -gff /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.repeat.annotation.gff /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/EXP_REFINEFINAL1_bppAdjust_cmap_P_EXSERTA_contigs_v1_1_3_fasta_NGScontigs_HYBRID_SCAFFOLD_improved.chain /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/PeexOM.repeat.gff3 /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/unmapped_PeexOM.repeat
+```
+Output with warning:
+```
+Reading liftover chains
+Mapping coordinates
+WARNING: -gff is not recommended.
+Use 'ldHgGene -out=<file.gp>' and then 'liftOver -genePred <file.gp>'
+```
+ldHgGene could be installed with: `conda install -c bioconda ucsc-ldhggene`, example use : `ldHgGene database table /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.repeat.annotation.gff -out=annotation.gp`, but no gene predictions made from gff, therefore used liftOver.
+
+### from PeexOM to PeexOMv1
+Transferring annotation
+```{bash, eval=F}
+liftOver -gff /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/PeexOM.repeat.gff3 /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_split_chim_kmm_guo/P.exserta.opticalmap.v1.fasta.masked.chain /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_split_chim_kmm_guo/PeexOMv1.repeat.gff3 /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_split_chim_kmm_guo/unmapped_PeexOMv1.repeat
+```
+
+
+### from PeexOMv1 to P.exserta.v.2.0
+Transferring annotation
+```{bash, eval=F}
+liftOver -gff /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_split_chim_kmm_guo/PeexOMv1.repeat.gff3 /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.chain /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.repeat.gff3 /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/unmapped_P.exserta.v.2.0.repeat
+```
+
+## Control
+
+| file name                                       |  number of lines (grep -v '#')  | notes |
+| ----------------------------------------------- | ------------------------------- | --------------------------------------------------------------------|
+| P.EXSERTA.contigs.v1.1.3.annotation.v1.GFF      |   454382                        |                                                                     |
+| PeexOM.gff3                                     |   454264                        |                                                                     | 
+| unmapped_PeexOM                                 |   118                           | # Split in new                                                      |
+| PeexOMv1.gff3                                   |   453558                        |                                                                     |
+| unmapped_PeexOMv1                               |   706                           | # Deleted in new / # Partially deleted in new / # Split in new      |
+| P.exserta.v.2.0.gff3                            |   453558                        |                                                                     |
+| unmapped_P.exserta.v.2.0                        |   0                             |                                                                     |
+| **total** items lost : **0.18 % (824)**, all items documented | | |
+
+
+| file name                                       |  number of lines (grep -v '#')  | notes |
+| ----------------------------------------------- | ------------------------------- | --------------------------------------------------------------------|
+| P.EXSERTA.contigs.v1.1.3.repeat.annotation.gff  |   1695932                       |                                                                     |
+| PeexOM.repeat.gff3                              |   1695717                       |                                                            | 
+| unmapped_PeexOM.repeat                          |   215                           | # Split in new                                                      |
+| PeexOMv1.repeat.gff3                            |   1693849                       |                                                                     |
+| unmapped_PeexOMv1.repeat                        |   1868                          | # Deleted in new / # Partially deleted in new / # Split in new      |
+| P.exserta.v.2.0.repeat.gff3                     |   1693849                       |                                                                     |
+| unmapped_P.exserta.v.2.0.repeat                 |   0                             |                                                                     |
+| **total** items lost : **0.12 % (2083)**, all items documented | | |

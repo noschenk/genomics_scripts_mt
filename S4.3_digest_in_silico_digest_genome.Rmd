@@ -1,0 +1,97 @@
+---
+title: "in silico digestion"
+author: 'Noëlle Schenk'
+date: "August 30, 2018"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=F}
+## try http:// if https:// URLs are not supported
+# source("https://bioconductor.org/biocLite.R")
+# biocLite("Biostrings")
+```
+
+```{r, message=FALSE}
+require(Biostrings)
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(scales)
+require(RColorBrewer)
+require(tidyr)
+# display.brewer.all()
+# rand.data <- replicate(8,rnorm(100,100,sd=1.5))
+# boxplot(rand.data,col=brewer.pal(8,"Set3"))
+brcol <- brewer.pal(7, "Dark2")
+```
+
+```{r, eval=F}
+genome <- readDNAStringSet("/home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.fasta")
+# enzyme_name <- "ApeKI"
+# renzym <- "GCWGC"
+# enzyme_name <- "BspQ1"
+# renzym <- "GCTCTTC"
+enzyme_name <- "PstI"
+renzym <- "CTGCAG"
+# count number of restriction enzyme matchings per contig
+counts <- vcountPattern(renzym, genome, fixed=F)
+
+.hist <- hist(counts, breaks=seq(0,max(counts)))
+str(.hist)
+with(.hist, plot(mids, counts, xlab="enzyme cutting sites per contig",ylab="frequency", main=paste("in silico genome digestion", enzyme_name), pch=16, col=brcol[1]), sub = paste(sum(counts)/ (sum(width(genome))/ 1000000), " enzyme cutting sites per Mb sequence"))
+abline(v=median(counts), col=brcol[2])
+abline(v=mean(counts), col=brcol[3])
+legend("topright", legend=c("data", paste("median=", round(median(counts), 2)), paste("mean=", round(mean(counts),2))), col=brcol[1:3], pch=15)
+pure <- recordPlot()
+
+# plot normalized counts
+normcounts <-counts / (width(genome)/1000000)
+.hist2 <- hist(normcounts, breaks=seq(0, max(normcounts)+1))
+str(.hist2)
+with(.hist2, plot(mids, counts,main="cutting sites per contig, normalized by contig length", col=brcol[4], xlab="cutting sites per contig and length [Mb]", ylab="Frequency"))
+abline(v=median(normcounts), col=brcol[5])
+abline(v=mean(normcounts), col=brcol[6])
+legend("topright", legend=c("data", paste("median=", round(median(normcounts), 2)), paste("mean=", round(mean(normcounts),2))), col=brcol[4:6], pch=15)
+norm_pure <- recordPlot()
+
+# correlation contig length vs cutting sites
+plot(counts, width(genome), col=brcol[7],xlab = "number of cutting sites", ylab = "contig length [Mb]", main="cutting sites per contig vs contig length")
+legend("topright", bty="n", legend="adj R-squared = 0.9203")
+r <- lm(width(genome)~counts)
+corr_pure <- recordPlot()
+```
+
+```{r}
+# attention with R squared and uncomment/comment for first value excluded
+# ApeKI : 0.9877
+# BspQ1 : 0.9203 
+# PstI : 0.9546
+par(mfrow=c(3,1))
+with(.hist, plot(mids, counts, xlab="enzyme cutting sites per contig",ylab="frequency", main=paste("in silico genome digestion", enzyme_name), pch=16, col=brcol[1]))
+abline(v=median(counts), col=brcol[2])
+abline(v=mean(counts), col=brcol[3])
+legend("topright", legend=c("data", paste("median=", round(median(counts), 2)), paste("mean=", round(mean(counts),2))), col=brcol[1:3], pch=15)
+with(.hist2, plot(mids[-1], counts[-1],main="cutting sites per contig, normalized by contig length", col=brcol[4], xlab="cutting sites per contig and length [Mb]", ylab="Frequency", sub=paste("0 cutting sites in", length(which(normcounts == 0))," cases of total ", length(normcounts), " contigs")))
+# with(.hist2, plot(mids, counts,main="cutting sites per contig, normalized by contig length", col=brcol[4], xlab="cutting sites per contig and length [Mb]", ylab="Frequency"))
+abline(v=median(normcounts), col=brcol[5])
+abline(v=mean(normcounts), col=brcol[6])
+legend("topright", legend=c("data", paste("median=", round(median(normcounts), 2)), paste("mean=", round(mean(normcounts),2))), col=brcol[4:6], pch=15)
+plot(counts, width(genome), col=brcol[7],xlab = "number of cutting sites", ylab = "contig length [Mb]", main="cutting sites per contig vs contig length")
+legend("topright", bty="n", legend="adj R-squared = 0.9546")
+triple <- recordPlot()
+```
+
+
+
+```{r}
+pdf(paste("cutting_sites_plots_", enzyme_name, ".pdf"), paper="a4r")
+triple
+dev.off()
+```

@@ -1,0 +1,277 @@
+---
+title: "ambiguous_bases"
+author: 'Noëlle Schenk'
+date: "August 31, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# gap lenth plot
+
+```{r, echo=F}
+require(Biostrings)
+genome <- readDNAStringSet("/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.fasta")
+g <- as.list(genome)
+require(RColorBrewer)
+display.brewer.all()
+brcol <- brewer.pal(8, "Dark2")
+require(tidyr)
+```
+
+```{r}
+test <- genome$chrchr1
+y = maskMotif(test,'N')
+z = as(gaps(y),"Views")
+# ranges(z)
+gaps <- as.data.frame(ranges(z))
+```
+
+```{r}
+# plot(gaps$start/ 1000000, gaps$width/ 1000000, xlim=c(0, 200))
+# plot(density(gaps$start / 1000000))
+```
+
+```{r}
+# plot gaps start and end position, the height of the point is the gap length, the horizontal position its position on the chromosome.
+# TODO : would something like gene density be better suited? Is it about the number and positions of gaps or the length of them?
+
+pdf("gaps.pdf", paper="a4r", width=11, height=4)
+# set graphical parameters
+par(mfrow=c(1,7), mar=c(0.3,0.3,1,0.3), oma=c(4,4,1,1))
+layout(matrix(seq(1,28), nrow = 1, ncol = 7, byrow = F))
+cpch = 16
+cax1 = c(0,2)
+
+# first plots with y axis
+plotname <- names(genome[1])
+dataset <- get(plotname, g)
+y = maskMotif(dataset,'N')
+z = as(gaps(y),"Views")
+gaps <- as.data.frame(ranges(z))
+
+plot(gaps$start/ 1000000, gaps$width/ 1000000, xlim=c(0, width(genome)[1]/1000000), axes=F, pch=cpch, col=brcol[1], xlab="physical length [Mb]", main=plotname, ylim=c(0,2), ylab="gap length [Mb]")
+axis(2, seq(0,2, 0.5), labels=T)
+axis(1)
+
+for(i in 2:7){
+  plotname <- names(genome[i])
+  dataset <- get(plotname, g)
+  y <- maskMotif(dataset, "N")
+  z = as(gaps(y), "Views")
+  gaps <- as.data.frame(ranges(z))
+  plot(gaps$start/ 1000000, gaps$width/ 1000000, axes=F, pch=cpch, col=brcol[i], xlab="physical length [Mb]", main=plotname, ylim=c(0,2), ylab="gap length [Mb]", xlim= c(0,width(genome)[i]/1000000))
+  axis(1)
+}
+# insert for loop for other chromosomes to make nice plot
+
+title(xlab = "Chromosome length [Mb]", ylab= "Gap length [Mb]", outer = TRUE, line = 2.5)
+dev.off()
+```
+
+
+# gap density plot
+
+```{r}
+# TODO : finish this like gene density plot! (if required)
+plotname <- names(genome[1])
+dataset <- get(plotname, g)
+y = maskMotif(dataset,'N')
+z = as(gaps(y),"Views")
+gaps <- as.data.frame(ranges(z))
+```
+```{r}
+j = 1
+.hist <- hist(gaps$start / 1000000, breaks= seq(0, (max(gaps$start / 1000000) + 2), by=2), plot = F)
+with(.hist, plot(mids, counts, pch=".", col=brcol[j], axes=F, main="", ylab="number of gaps per 2 Mb"), ylim = c(0, 20))
+with(.hist, lines(mids, counts, col=brcol[j]))
+# plot where gaps longer than 300 kb are. (ALLMAPS automatically introduces gaps of 100kb length)
+lgs <- gaps[which(gaps$width/ 1000000 > 0.3),"start"]
+points(lgs/1000000, rep(0, length(lgs)), col=brcol[8], pch=17)
+axis(2, seq(0, 20,5))
+axis(1)
+```
+
+
+
+# gene density plot
+mRNA or gene density
+```{r}
+gff <- read.table("/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.gff3")
+mrna <- gff[which(gff$V3 == "mRNA"),]
+gene <- gff[which(gff$V3 == "gene"),]
+chrs <- paste("chrchr", seq(1,7), sep="")
+```
+
+```{r}
+# plotting
+pdf("gendensity.pdf", paper="a4r", width=11, height=4)
+par(mfrow=c(1,7), mar=c(0.3,0.3,1,0.3), oma=c(4,4,1,1))
+layout(matrix(seq(1,28), nrow = 1, ncol = 7, byrow = F))
+
+# first plot
+j = 1
+.hist <- hist(gene[which(gene$V1 == chrs[j]), "V4"] / 1000000, breaks= seq(0, (max(gene[which(gene$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+with(.hist, plot(mids, counts, pch=".", col=brcol[j], axes=F, main=chrs[1], ylim=c(0,280), ylab="number of genes per 2 Mb"))
+with(.hist, lines(mids, counts, col=brcol[j]))
+axis(2)
+axis(1)
+
+for(j in seq(2,7)){
+  .hist <- hist(gene[which(gene$V1 == chrs[j]), "V4"] / 1000000, breaks= seq(0, (max(gene[which(gene$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot=F)
+  with(.hist, plot(mids, counts, pch=".", col=brcol[j], axes=F, main=chrs[j], ylim=c(0,280), ylab="number of genes per 2 Mb"))
+  with(.hist, lines(mids, counts, col=brcol[j]))
+  axis(1)
+}
+
+title(xlab = "Pseudochromosome length [Mb]", ylab= "number of genes per 2 Mb", outer = TRUE, line = 2.5)
+dev.off()
+```
+
+# gene vs repeat content
+```{r}
+reps <- read.table("/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.repeat.gff3")
+replens <- reps$V5 - reps$V4
+replens <- sum(replens)
+# mrnalens <- mrna$V5 - mrna$V4
+# mrnalens <- sum(mrnalens)
+# mrna lengths and gene lengths are the same
+genelens <- gene$V5- gene$V4
+genelens <- sum(genelens)
+plot(c(0,1), c(replens, mrnalens))
+# percent repeats vs. percent MRNA
+replens / sum(replens, mrnalens)
+mrnalens / sum(replens, mrnalens)
+# percent repeats on the assembled genome
+genomelength <- 1707.16 * 1000000
+replens / genomelength
+genelens / genomelength
+```
+
+
+# repeat denstiy plot
+```{r}
+require(RColorBrewer)
+display.brewer.all()
+brcol <- brewer.pal(8, "Dark2")
+require(tidyr)
+chrs <- paste("chrchr", seq(1,7), sep="")
+```
+
+
+```{r}
+reps <- read.table("/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.repeat.gff3")
+# only store entries from pseudochromosomes
+reps <- reps[grep("chrchr", reps$V1),]
+# find long repeats to report in plot. longer than 12 kb is shown
+lr <- reps[which((reps$V5 - reps$V4) > 12000), c("V1","V4")]
+# separate column V10 into 2
+reps <- separate(reps, col = "V10", into=c("motif", "family"), sep=":")
+```
+
+```{bash, eval=F}
+# within /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/
+cat consensi.fa.classified | grep '>' | cut -f 1 -d '(' | tr '#' ' ' | sed 's/>rnd/rnd/g'  > repeatfams.txt
+```
+
+```{r}
+# read document with repeat families
+fams <- read.table("/home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/repeatfams.txt")
+names(fams) <- c("family", "type")
+# assign repeat type to each family
+reptps <- merge(reps, fams, by="family")
+# more wide classification of repeats for plotting
+# before uncommenting, make sure the classification is in the right format!
+clas <- read.table("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/repeatclassification-newest.csv", sep=",", header = T)
+clas <- clas[,1:2]
+names(clas) <- c("type", "group")
+# assign new groups to repeats
+repty <- merge(reptps, clas, by="type")
+groups <- unique(repty$group)
+```
+
+```{r}
+# plotting
+pdf("repeatdensity-detali.pdf", paper="a4r", width=11, height=4)
+par(mfrow=c(1,7), mar=c(0.3,0.3,1,0.3), oma=c(4,4,1,1))
+layout(matrix(c(seq(1,7), rep(8,7)), nrow = 2, ncol = 7, byrow = T),heights = c(0.8,0.2))
+
+# first plot
+j = 1
+c = 1
+g = "DNA transposons"
+.hist <- hist(repty[which(repty$V1 == chrs[j] & repty$group == g), "V4"] / 1000000, breaks= seq(0, (max(repty[which(repty$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+with(.hist, plot(mids, counts, pch=".", col=brcol[c], axes=F, main=chrs[j], ylim=c(0, 3000), ylab="number of genes per 2 Mb"))
+with(.hist, lines(mids, counts, col=brcol[c], cex=1.5))
+
+for(c in 2:length(groups)){
+  g <- groups[c]
+  .hist <- hist(repty[which(repty$V1 == chrs[j] & repty$group == g), "V4"] / 1000000, breaks= seq(0, (max(repty[which(repty$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+  with(.hist, points(mids, counts, pch=".", col=brcol[c]))
+  with(.hist, lines(mids, counts, col=brcol[c], cex=1.5))
+}
+axis(2)
+axis(1)
+
+for(j in seq(2,7)){
+  c = 1
+  g = "DNA transposons"
+  .hist <- hist(repty[which(repty$V1 == chrs[j] & repty$group == g), "V4"] / 1000000, breaks= seq(0, (max(repty[which(repty$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+  with(.hist, plot(mids, counts, pch=".", col=brcol[c], axes=F, main=chrs[j], ylim=c(0, 3000), ylab="number of genes per 2 Mb"))
+  with(.hist, lines(mids, counts, col=brcol[c], cex=1.5))
+
+  for(c in 2:length(groups)){
+    g <- groups[c]
+    .hist <- hist(repty[which(repty$V1 == chrs[j] & repty$group == g), "V4"] / 1000000, breaks= seq(0, (max(repty[which(repty$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+    with(.hist, points(mids, counts, pch=".", col=brcol[c]))
+    with(.hist, lines(mids, counts, col=brcol[c], cex=1.5))
+  }
+  axis(1)
+}
+title(xlab = "Pseudochromosome length [Mb]", ylab= "number of repeats per 2 Mb", outer = TRUE, line = 2.5, cex=1.5)
+
+plot(1, type = "n", axes=FALSE, xlab="", ylab="")
+legend("center", legend=groups, col=brcol[1:4], pch=15, horiz=T)
+dev.off()
+
+```
+
+
+
+
+
+
+# old plot, not separated by repeat groups
+```{r}
+# plotting
+pdf("repeatdensity.pdf", paper="a4r", width=11, height=4)
+par(mfrow=c(1,7), mar=c(0.3,0.3,1,0.3), oma=c(4,4,1,1))
+layout(matrix(seq(1,28), nrow = 1, ncol = 7, byrow = F))
+
+# first plot
+j = 1
+
+.hist <- hist(reps[which(reps$V1 == chrs[j]), "V4"] / 1000000, breaks= seq(0, (max(reps[which(reps$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot = F)
+with(.hist, plot(mids, counts, pch=".", col=brcol[j], axes=F, main=chrs[j], ylim=c(0, 3000), ylab="number of genes per 2 Mb"))
+with(.hist, lines(mids, counts, col=brcol[j], cex=1.5))
+# show long repeats
+lcr <- lr[which(lr$V1 == chrs[j]), "V4"]
+points(lcr/1000000, rep(0, length(lcr)), col=brcol[8], pch=17)
+axis(2)
+axis(1)
+
+for(j in seq(2,7)){
+  .hist <- hist(reps[which(reps$V1 == chrs[j]), "V4"] / 1000000, breaks= seq(0, (max(reps[which(reps$V1 == chrs[j]), "V4"] / 1000000) + 2), by=2), plot=F)
+  with(.hist, plot(mids, counts, pch=".", col=brcol[j], axes=F, main=chrs[j], ylim=c(0,3000), ylab="number of genes per 2 Mb", cex=1.5))
+  with(.hist, lines(mids, counts, col=brcol[j]))
+  lcr <- lr[which(lr$V1 == chrs[j]), "V4"]
+  points(lcr/1000000, rep(0, length(lcr)), col=brcol[8], pch=17)
+  axis(1)
+}
+
+title(xlab = "Pseudochromosome length [Mb]", ylab= "number of repeats per 2 Mb", outer = TRUE, line = 2.5, cex=1.5)
+dev.off()
+```
+

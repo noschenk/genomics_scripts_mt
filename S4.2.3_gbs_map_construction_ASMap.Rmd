@@ -1,0 +1,213 @@
+---
+title: "Map construction with ASMap"
+output:
+  html_document:
+    df_print: paged
+---
+# Map of Peex genome
+# Loading required packages
+```{r message=F}
+require(ASMap)
+require(RColorBrewer)
+require(dplyr)
+require(ggplot2)
+require(reshape2)
+require(ggparallel)
+require(wgaim)
+setwd("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3")
+dopdf = TRUE # to create pdf document
+```
+
+# Visualization of input data
+Heterozygous sites have been replaced by NA. The number of heterozygous sites was 37564, the number of axillaris 143739 and the number or exserta 179837. The heterozygosity therefore was `r 37564/(179837 + 37564 + 143739)`.
+
+### Genotype frequencies among individuals
+number or markers per individual which are of a given genotype.
+```{r}
+indvs <- read.table("F7-K/LM3_F7_K.INDIVIDUAL.genoSUMMARY.csv", header=T, sep=",")
+i_nmar <- unique(indvs$tot)
+print(as.character(indvs[which(indvs$NA. > 1000), "individual"])) # are removed in cleaned marker set
+```
+The individuals: "RIL_35" "RIL_44" "RIL_67" "RIL_88" have been excluded from analysis
+```{r}
+ggplot(data = indvs, aes(AX, EX)) + geom_point(alpha = 0.2)
+if(dopdf == T){ggsave("figures/filtering1.pdf")}
+
+indvs <- melt(indvs)
+indvs <- indvs %>% filter(variable != "tot")
+#check for exessive missings
+indvs[which(indvs$NA. > 1000),] # 0, nothing to remove
+
+ggplot(indvs, aes(factor(variable), value / i_nmar)) +
+  geom_jitter(height = 0, width = 0.45, size = 0.2, colour = "grey50") + geom_violin(aes(fill = variable), draw_quantiles = 0.5) + labs(x = "Genotypes", y="Frequency", title = "Genotype frequencies among individuals", subtitle = paste("Median : AX = ", median(indvs[indvs$variable == "AX", "value"] / i_nmar), " EX = ", median(indvs[indvs$variable == "EX", "value"] / i_nmar), "Missing = ", median(indvs[indvs$variable == "NA.", "value"] / i_nmar)))
+if(dopdf == T){ggsave("figures/filtering2.pdf")}
+```
+
+### Genotype frequencies among markers
+number of individuals per marker which are of a given genotype.
+```{r}
+mrks <- read.table("F7-K/LM3_F7_K.MARKER.genoSUMMARY.csv", header=T, sep=",")
+mrks <- melt(mrks)
+mrks <- mrks %>% filter(variable != "tot")
+
+#check for exessive missings
+mrks[which(mrks$NA. > 100),] # 0, nothing to remove
+
+ggplot(data = mrks, aes(value, fill = variable)) +
+  geom_density(alpha = 0.2)
+if(dopdf == T){ggsave("figures/filtering3.pdf")}
+
+ggplot(mrks, aes(factor(variable), value/195)) + 
+  geom_jitter(height = 0, width = 0.45, size = 0.1, colour = "grey50") + geom_violin(aes(fill = variable), draw_quantiles = 0.5) +
+  labs(x = "Genotypes", y="Frequency", title = "Genotype frequencies among markers", subtitle = paste("Median AX = ", median(mrks[mrks$variable == "AX", "value"] / 195), "EX = ", median(mrks[mrks$variable == "EX", "value"] / 195), "missing = ", median(mrks[mrks$variable == "NA.", "value"] / 195)))
+if(dopdf == T){ggsave("figures/filtering4.pdf")}
+```
+
+
+```{r}
+geno <- read.table("F7-K/F7-K.geno.csv", header=T, sep=",")
+nhet <- sum(as.vector(apply(geno == "HET", 2, sum)), na.rm=T) / (sum(as.vector(apply(geno == "AX", 2, sum)), na.rm=T) + sum(as.vector(apply(geno == "EX", 2, sum)), na.rm=T))
+```
+Heterozygosity [%] : `r nhet`
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------------------------------------------------------------- -->
+
+
+# Map Construction
+## Read in and format data
+In the input file, **axillaris** genotype is encoded by "AX", heterozygous as "HET" and **exserta** as "EX". Missing data is encoded as "-". 
+
+| input file | read.cross | f7_K |
+|:----|:----|:----|
+| AX | AA | 1 |
+| HET | AB |  |
+| EX | BB | 2 |
+| - | | NA |
+```{r}
+f7_K <- read.cross(format = "csv", file = "F7-K/LM3_F7_K.markers.clean.csv", F.gen = 7, genotypes = c("AX", "HET", "EX"), na.strings = "-")#, crosstype = "riself")
+f7_K <- convert2riself(f7_K)
+```
+The population needs to be converted to riself (a selfing RIL population after many generations). This assumes heterozygosity to be 0. The heterozygotes were manually removed.
+
+## pulling markers
+Pull out markers which are co.located.
+Why not also remove markers which show linkage disequilibrium? We expect and see LD. However, we don't want to lose too many markers. Therefore we let it be.
+```{r}
+f7_K <- pullCross(f7_K, type = "co.located")
+```
+
+## Cluster markers to LGs and order within
+Q : Why does this not reduce genetic distance? If the distance is inflated due to small errors within the chromosomes, ordering should reduce the amount of crossovers found between markers (at least a little bit). - It is not expected in any case, but can happen. So no reduction of genetic distance is not a sign for a low quality map, but normal. 
+
+mvest.bc is required, if not, the clustering into linkage groups is not performed as well. mvest.bc imputes missing markers before clustering into linkage groups.
+```{r}
+#set bychr = FALSE to allow complete reconstruction of map 
+map1 <- mstmap.cross(f7_K, bychr = F, dist.fun = "kosambi", trace = FALSE, detectBadData = F, p.value = 1e-09, mvest.bc = T, return.imputed = T)
+
+# order markers within linkage groups
+map1 <- mstmap.cross(map1, bychr = T, dist.fun = "kosambi", trace = FALSE, detectBadData = F, p.value = 1e-09, mvest.bc = F, return.imputed = T)
+summary(map1)
+```
+
+
+## Quality Control 1 
+before pushing back in markers.
+
+The expected recombination rate is 1 per generation and chromosome. Plotting `profileGen` per chromosome therefore requires `xo.lambda = 7`. If it is plotted for all linkage groups, `xo.lambda` should be set to `49`.
+
+```{r}
+if(dopdf == T){pdf("figures/QC1_before_pusing_back_in_markers.pdf")}
+heatMap(map1, lmax=15)
+for(i in paste("L.", seq(1,7), sep="")){
+  profileGen(map1, stat.type = c("xo", "dxo", "miss"), xo.lambda = 7, chr=i)
+}
+profileMark(map1, stat.type = c("seg.dist", "dxo", "erf", "lod"), id = "Genotype", layout = c(1, 4), type = "l")
+mean(countXO(map1))
+if(dopdf == T){dev.off()}
+```
+## Plot interpretation
+heatMap: see clear linkage groups.
+
+profileGen (per chromosome) : 
+* no pink circles in the "per-chromosome-plots".
+* Crossovers : expected amount of crossovers per chromosome ~ 7 (because 7 generations of RIL). Less is okay, because heterozygosity was removed artificially. Per heterozygous marker, a potential double-crossover was removed.
+
+profileMark:
+* Seg Distortion : don't use it. But a higher value shows regions with high segregation distortion, where linkage is not as expected, e.g. we would expect such behaviour at the speciation island.
+* Double Crossovers : 6 is very high, the amount of DCOs is expected to be lower after imputation. Around 2-3 would be OK.
+
+## Pushing markers back in
+```{r}
+# push back in markers
+map1 <- pushCross(map1, type="co.located")
+# order again
+map1 <- mstmap(map1, bychr = T, dist.fun = "kosambi", trace = TRUE, detectBadData = F, p.value = 1e-09, mvest.bc = F, return.imputed = T)
+```
+Some markers are now on top of each other. We could use jittermap to move them away from each other, however that would introduce a manual distance of markers. todo do that?
+
+## create pdf of graphs (QC)
+```{r}
+if(dopdf == T){
+  pdf("figures/QC_map_before_imp.pdf", onefile=T, paper="a4r", width = 11)
+  heatMap(map1, lmax=15)
+  for(i in paste("L.", seq(1,7), sep="")){
+    profileGen(map1, stat.type = c("xo", "dxo", "miss"), xo.lambda = 25, chr=i)
+  }
+  profileMark(map1, stat.type = c("seg.dist", "dxo", "erf", "lod"), id = "Genotype", layout = c(1, 4), type = "l")
+  dev.off()
+}
+```
+
+## wgaim to impute markers
+"You can then use cross2int() in this package to perform a smart imputation on your linkage map. It does two things, it condenses the co-located markers into unique markers and this imputes most missing alleles. Then remaining missing values are then imputed using a probabilistic numerical flanking marker algorithm."
+cross2int converts cross data to "interval" data and imputes missing markers.
+```{r}
+# impute
+map1 <- cross2int(map1, id="Genotype", rem.mark=F) # rem.mark = F to not take out colocated markers from the map
+
+# # geno contains the full genetic map
+# map1$geno$L.1$map[1:10]
+# # imputed contains unique markers
+# map1$imputed.geno$L.1$map[1:4]
+
+# merge L.8 to L.12 into one linkage group
+map1 <- mergeCross(map1, merge = list("L.8" = c("L.8", "L.9", "L.10", "L.11" ,"L.12")))
+```
+
+Save the created map in several formats
+```{r}
+saveRDS(map1, "map_imputed.rds")
+
+write.cross(map1, format="qtab", filestem="output_map/geneticmap")
+# 'qtab' format produces a lot of files I will not further use. Delete them. The only file saved will be 'geneticmap_location.qtab'
+file.remove("output_map/geneticmap_phenotypes.qtab"); file.remove("output_map/geneticmap_founder.qtab"); file.remove("output_map/geneticmap_genotypes.qtab"); file.remove("output_map/geneticmap_symbols.qtab")
+#map1 <- readRDS("map1_imputed.rds")
+```
+To convert the .qtab file to .bed format and take out linkage group 8, run bash: 
+```{bash, eval=F}
+cat geneticmap_location.qtab | tail -n +4 | head -n -1 | tr '_' '\t' | awk ' $3 != "L.8" ' | awk ' {print $1 "\t" $2 "\t" $2+1 "\t" $3 ":" $4} ' > geneticmap.L1to7.bed
+```
+
+Plotting the map
+```{r echo=T, results="hide"}
+plot.map(map1, main = "Genetic map, imputed")
+# link.map(map1, chr="L.3")
+# geno.image(map1, main = "Genetic map, imputed",alternate.chrid=T)
+# knitr::kable(head(geno.table(map1)))
+```
+Keep in mind that Linkage group 8 (L.8) is (?) consisting of the markers which could not be associated to any other group. Possibly it contains markers from the chloroplast or mitochondrium DNA.
+
+```{r}
+head(geno.table(map1), n=5L)
+```
+
+
+p value is from chi-square tests for mendelian segregation. Are the observed genotypes compatible with the expected ones? Formula : sum of $\frac{(O - E)^2}{E}$ for all observation classes. 
+
+Markers with a high p-value are expected to be distorted. (correct?) todo : clarify
+
+
+# Outlook
+Quality check of the map in the Script "QC_genetic_map.Rmd" and further processing with ALLMAPS.

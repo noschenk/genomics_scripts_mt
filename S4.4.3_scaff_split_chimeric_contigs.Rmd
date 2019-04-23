@@ -1,0 +1,84 @@
+# Splitting chimeric contigs
+follow instruction [here](https://github.com/tanghaibao/jcvi/wiki/ALLMAPS%3A-How-to-split-chimeric-contigs).
+
+Splitting of chimeric contigs must be done before the first round of ALLMAPS, as described in the [ALLMAPS publication](https://www.ncbi.nlm.nih.gov/pubmed/25583564).
+
+pwd : /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_split_chim_kmm_guo/
+
+## data
+
+F7AE_K            : /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/kns_to_kmm_geneticmaps/F7AE_Kmm.bed
+F7AE_W            : /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/Guo2017_map/F7AE_W.bed
+PeexOM            : /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta
+
+activate virualenv.
+```{bash, eval=T}
+source activate spassmitallmaps
+```
+
+## merge maps
+F7AE_K and F7AE_W
+```{bash, eval=F}
+python -m jcvi.assembly.allmaps mergebed /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/kns_to_kmm_geneticmaps/F7AE_Kmm.bed /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/Guo2017_map/F7AE_W.bed -o merged.bed
+```
+
+## find rough breakpoints from genetic maps
+Find cases in which the genetic maps contradict each other or themselves. Locations where this happens are stored in breakpoints.bed. These coordinates are very rough, breakpoints are regions.
+```{bash, eval=F}
+python -m jcvi.assembly.allmaps split merged.bed --chunk=4 > breakpoints.bed
+```
+22 breakpoints were inferred.
+
+## find gaps in genome
+find gaps (ambiguous bases) in genome and find the nearest gap for each breakpoint.
+```{bash, eval=F}
+python -m jcvi.formats.fasta gaps /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta
+mv /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.gaps.bed .
+python -m jcvi.assembly.patch refine breakpoints.bed P.exserta.opticalmap.v1.gaps.bed
+```
+## create agp file
+.agp contains information on where the breakpoints will be.
+```{bash, eval=F}
+python -m jcvi.formats.sizes agp /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta
+mv /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta.agp .
+python -m jcvi.formats.agp mask P.exserta.opticalmap.v1.fasta.agp breakpoints.P.refined.bed --splitobject --splitsingle
+python -m jcvi.formats.agp build P.exserta.opticalmap.v1.fasta.masked.agp /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta P.exserta.opticalmap.v1.SPLIT.fasta
+```
+
+
+# Translate maps to new genome
+Similar to [this question](), the maps can be translated to the newly generated, split genome.
+```{bash, eval=F}
+python -m jcvi.formats.chain fromagp P.exserta.opticalmap.v1.fasta.masked.agp /home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta P.exserta.opticalmap.v1.SPLIT.fasta
+```
+This code produced `P.exserta.opticalmap.v1.fasta.masked.chain`, which can be used with `liftOver`.
+```{bash, eval=F}
+liftOver map.bed genome.chain newmap.bed unmapped
+```
+5 markers were deleted: 
+```
+#Deleted in new
+Super-Scaffold_727	1393362	1393363	F7AE_Kmm-chr7:26.8048561566844	Super-Scaffold_727:1393363
+#Deleted in new
+Super-Scaffold_3323	5431616	5431617	F7AE_Kmm-chr3:51.290394054459	Super-Scaffold_3323:5431617
+#Deleted in new
+Super-Scaffold_8302	3948781	3948782	F7AE_Kmm-chr7:25.2327400624687	Super-Scaffold_8302:3948782
+#Deleted in new
+Super-Scaffold_13962	2231993	2231994	F7AE_Kmm-chr2:46.6169279708776	Super-Scaffold_13962:2231994
+#Deleted in new
+Super-Scaffold_14118	3489108	3489109	F7AE_Kmm-chr2:47.6765461257943	Super-Scaffold_14118:3489109
+```
+The new map was saved to `newmap.bed`.
+
+# Scaffolding
+Proceed like in a "normal" ALLMAPS workflow but with the **new genome**.
+
+weights.txt file:
+```
+F7AE_Kmm 1
+F7AE_W 1
+```
+Run ALLMAPS
+```{bash, eval=F}
+python -m jcvi.assembly.allmaps path newmap.bed P.exserta.opticalmap.v1.SPLIT.fasta
+```

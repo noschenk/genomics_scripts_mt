@@ -1,0 +1,127 @@
+---
+title: "map_construction_ASMap"
+author: 'Noëlle Schenk'
+date: "August 16, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Loading required packages, set wd, set dopdf=TRUE.
+```{r ,message=F, echo=F}
+require(ASMap)
+require(RColorBrewer)
+require(dplyr)
+require(ggplot2)
+require(reshape2)
+require(ggparallel)
+require(wgaim)
+setwd("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/2GBS_LebMAP3_ASMap")
+dopdf = TRUE # to create pdf document
+```
+
+## Remove excessive missing
+All markers were removed with less than 100 individuals. (= more than 100 individuals missing).
+
+All individuals were removed with less than 1000 markers. (=more than 1000 markers missing).
+```{r}
+mrks <- read.table("F7-K_OM/LM3_F7_K_OM.MARKER.genoSUMMARY.csv", header=T, sep=",")
+mrks <- melt(mrks)
+#check for exessive missings
+remove_mrks <- mrks[which(mrks$NA. > 100),] # 0, nothing to remove
+
+indvs <- read.table("F7-K_OM/LM3_F7_K_OM.INDIVIDUAL.genoSUMMARY.csv", header=T, sep=",")
+remove_inds <- as.character(indvs[which(indvs$NA. > 1000), "individual"]) # are removed in cleaned marker set
+```
+Individuals `r print(remove_inds)` are removed. 
+
+No markers are removed. `r print(remove_mrks) #0`
+
+```{bash, eval=F}
+cat LM3_F7_K_OM.markers.csv | grep -v 'RIL_35' | grep -v 'RIL_44' | grep -v 'RIL_67' | grep -v 'RIL_88' > LM3_F7_K_OM.markers.clean.csv
+```
+```{r, eval = F}
+mc <- read.csv("F7-K_OM/LM3_F7_K_OM.markers.clean.csv")
+mc[] <- lapply(mc, as.character)
+pheno <- seq(0,ncol(mc)-1)
+mc <- rbind(pheno, mc)
+# take out parentals
+mc <- mc[which(mc$X != "exserta" & mc$X != "axillaris"), ]
+write.csv(mc, "F7-K_OM/LM3_F7_K_OM.markers.clean.csv", na = "-", row.names = F)
+```
+**manually** insert "Genotype" in the upmost left corner and delete entry "0" in second row.
+
+| Genotype | Super.Sc... | Suber.Sc... | ... |
+| -------- | ----------- | ----------- | --- |
+|          |      1      |      2      | ... |
+| exserta  |      AA     |      AA     | ... |
+| axillaris|      TT     |      TT     | ... |
+|   ...    |     ...     |      ...    | ... |
+
+
+# Map Construction
+## Read in and format data
+In the input file, **axillaris** genotype is encoded by "AX", heterozygous as "HET" and **exserta** as "EX". Missing data is encoded as "-". 
+
+| input file | read.cross | f7_K |
+|:----|:----|:----|
+| AX | AA | 1 |
+| HET | AB |  |
+| EX | BB | 2 |
+| - | | NA |
+```{r}
+f7_K <- read.cross(format = "csv", file = "F7-K_OM/LM3_F7_K_OM.markers.clean.csv", F.gen = 7, genotypes = c("AX", "HET", "EX"), na.strings = "-")#, crosstype = "riself")
+f7_K <- convert2riself(f7_K)
+f7_K <- pullCross(f7_K, type = "co.located")
+#set bychr = FALSE to allow complete reconstruction of map 
+map1 <- mstmap.cross(f7_K, bychr = F, dist.fun = "kosambi", trace = FALSE, detectBadData = F, p.value = 1e-09, mvest.bc = T, return.imputed = T)
+# order markers within linkage groups
+map1 <- mstmap.cross(map1, bychr = T, dist.fun = "kosambi", trace = FALSE, detectBadData = F, p.value = 1e-09, mvest.bc = F, return.imputed = T)
+summary(map1)
+```
+```{r}
+heatMap(map1, lmax=15)
+```
+```{r}
+profileMark(map1, stat.type = c("seg.dist", "dxo", "erf", "lod"), id = "Genotype", layout = c(1, 4), type = "l")
+```
+```{r}
+mean(countXO(map1))
+```
+```{r}
+# push back in markers
+map1 <- pushCross(map1, type="co.located")
+# order again
+map1 <- mstmap(map1, bychr = T, dist.fun = "kosambi", trace = TRUE, detectBadData = F, p.value = 1e-09, mvest.bc = F, return.imputed = T)
+heatMap(map1, lmax=12)
+```
+
+```{r}
+profileMark(map1, stat.type = c("seg.dist", "dxo", "erf", "lod"), id = "Genotype", layout = c(1, 4), type = "l")
+```
+```{r}
+# impute
+map1 <- cross2int(map1, id="Genotype", rem.mark=F) # rem.mark = F to not take out colocated markers from the map
+
+# # geno contains the full genetic map
+# map1$geno$L.1$map[1:10]
+# # imputed contains unique markers
+# map1$imputed.geno$L.1$map[1:4]
+
+# merge smallest four linkage groups into one
+map1 <- mergeCross(map1, merge = list("L.mixed" = c("L.1", "L.10", "L.11", "L.12" ,"L.9")))
+```
+```{r}
+write.cross(map1, format="csv", filestem="results/geneticmap2")
+write.cross(map1, format="qtab", filestem="results/geneticmap2")
+# 'qtab' format produces a lot of files I will not further use. Delete them. The only file saved will be 'geneticmap_location.qtab'
+file.remove("results/geneticmap2_phenotypes.qtab"); file.remove("results/geneticmap2_founder.qtab"); file.remove("results/geneticmap2_genotypes.qtab"); file.remove("results/geneticmap2_symbols.qtab")
+```
+To convert the .qtab file to .bed format and take out linkage group 8, run bash: 
+```{bash, eval=F}
+cat geneticmap2_location.qtab | grep -v '#' | sed 's/Super.Sc/Super-Sc/g' | awk '$2 != "L.mixed"' | tr '_' '\t' | awk '{print $1 "_" $2 "\t" $3 "\t" $3+1 "\t" $4 ":" $5}' > geneticmap2_L1to7.bed
+```
+```{r}
+plot.map(map1, main = "Genetic map, imputed")
+```

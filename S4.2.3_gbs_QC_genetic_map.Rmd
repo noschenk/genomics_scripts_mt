@@ -1,0 +1,266 @@
+---
+title: "Quality control of a genetic map"
+author: 'Noëlle Schenk'
+date: "June 28, 2018"
+output: html_document
+---
+
+```{r message=F}
+require(ASMap)
+require(RColorBrewer)
+require(dplyr)
+require(ggplot2)
+require(reshape2)
+require(ggparallel)
+require(wgaim)
+require(VennDiagram)
+setwd("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3")
+dopdf = TRUE # to create pdf document
+# read in data
+map1 <- readRDS("map_imputed.rds")
+plot.map(map1, main = "Genetic map, imputed")
+```
+```{r}
+summaryMap(map1)
+```
+
+## Crossovers
+TODO : does that look strange? Shouldn't that be around 50 and even up to 200?
+```{r}
+# print number of crossovers of all individuals per chromosome
+XOs <- countXO(map1, bychr=T)
+# get mena number of XOs per chromosome
+apply(XOs, 2, mean)
+# get overall mean of XOs over all linkage groups
+mean(countXO(map1))
+```
+
+The mean number of crossovers per chromosome is `r countXO(map1)`
+
+## Heat map
+Lower triangle : pairwise LOD scores, higher triangle : pairwise estimated RFs. Heat of lower triangle should match heat of upper triangle. Markers within linkage groups are consistent linkage. The linkage within groups is much higher than linkage between groups. A clear clustering was possible.
+
+Good heat map shows that construction process was successful. No detail problems are shown.
+```{r}
+heatMap(map1, lmax=15)
+```
+
+## Check recombination rate
+The recombination rate should be appropriate, this is one of the key quality characteristics.
+
+If there are Genotypes that exceed this expected recombination rate, they are shown in the graph below. xo.lambda: Number of crossovers is minimum 1 per generation and chromosome. Can be up to around 4.
+```{r}
+# pdf("figures/finalmap_profileGen_single.pdf")
+# for(i in paste("L.", seq(1,8), sep="")){
+#   profileGen(map1, stat.type = c("xo", "dxo", "miss"), xo.lambda = 7, chr=i)
+# }
+# dev.off()
+
+if(dopdf == TRUE){pdf("figures/finalmap_profileGen.pdf")}
+profileGen(map1, stat.type = "xo", xo.lambda = 49, chr=paste("L.", seq(1,7), sep=""))
+profileGen(map1, stat.type = "dxo", xo.lambda = 49, chr=paste("L.", seq(1,7), sep=""))
+profileGen(map1, stat.type = "miss", chr=paste("L.", seq(1,7), sep=""))
+if(dopdf == TRUE){dev.off()}
+```
+
+## profile mark
+profile individual marker and interval statistics.
+
+```{r}
+#profileMark(map1, stat.type = c("miss", "recomb", "dxo"), id = "Genotype", layout = c(1, 4), type = "l")
+if(dopdf == TRUE){pdf("figures/finalmap_profileMark.pdf")}
+profileMark(map1, stat.type = c("miss", "dxo", "recomb"), id = "Genotype", layout = c(1, 4), type = "l")
+if(dopdf == TRUE){dev.off()}
+```
+
+## Genotypes
+```{r, eval=F}
+if(!file.exists("by_hand/exfrequencies.rds")){
+  source("small_scripts/generate_exfrequencies.r")
+}
+source("small_scripts/generate_linkdes_master_plot.r")
+```
+Show frequency of genotypes along the map, this illustrates linkage disequilibrium.
+
+
+## create pdf of graphs
+```{r}
+if(dopdf == T){
+  pdf("figures/QC_map_imputed.pdf", onefile=T, paper="a4r", width = 11)
+  heatMap(map1, lmax=15)
+  profileGen(map1, stat.type=c("xo", "dxo", "miss"), xo.lambda = 49, chr = paste("L.", seq(1,7), sep=""))
+  # for(i in paste("L.", seq(1,7), sep="")){
+  #   profileGen(map1, stat.type = c("xo", "dxo", "miss"), xo.lambda = 7, chr=i)
+  # }
+  profileMark(map1, stat.type = c("seg.dist", "dxo", "erf", "lod"), id = "Genotype", layout = c(1, 4), type = "l")
+  plot.map(map1, main = "Genetic map, imputed")
+  dev.off()
+}
+```
+
+# Association of Linkage groups with Chromosomes
+
+## Blast genes in Pax pseudomolecules (PaxChr)
+Print map to see contig names and distances of markers to each other. 
+Find gene name on the P.exserta annotation file, search CDS in P.exserta MRNA file and blast against newest P.axillaris genome to check which chromosome it is. Table in Excel file "by_hand/LG_to_chr.ods" and (?) in the .csv file "by_hand/PaxChr.csv". Write down position of marker on chromosome. 
+
+Focus on markers in the beginning and end of chromosome, there the data is more reliable.
+```{bash, eval=F}
+# from where P.exserta annotation is stored
+grep '^Peex113Ctg08628\speex113\sgene' P.EXSERTA.contigs.v1.1.3.annotation.v1.gff
+# copy out name by hand and search with vim in file
+vim P.EXSERTA.contigs.v1.1.3.annotation.v1.MRNA.fasta # search with '/genename'
+# copy out CDS and blast with SequenceServer
+```
+plot results
+```{r}
+lgpax <- read.table("by_hand/PaxChr.csv", header=T, sep = ",")
+ggparallel(list('Linkage.group', 'AX.chromosome.best.match'), lgpax)
+if(dopdf == T){ggsave("figures/PaxChr_plot.pdf")}
+```
+
+## Compare with Optical mapping Super Scaffolds (OMss)
+Are the same contigs together on a chromosome and on a super-scaffold?
+```{r}
+ss <- read.table("by_hand/OMss.csv", sep=",", header=T)
+ss[,"OM"] <- as.numeric(as.factor(ss$Super.Scaffold.OM))
+ggparallel(list('Linkage.Group','OM'), ss)
+if(dopdf == T){ggsave("figures/OMss_plot.pdf")}
+```
+We do not see any overlap, this is great.
+
+Check if the "problematic" contigs (the ones occurring in more than 1 linkage group) show conflicts in the optical mapping. There are 242 contigs showing conflict and 178 inter-LG-duplicate contigs.
+Find list of conflicting Contigs in Optical mapping output and compare to the duplicate contigs list. 36 of the 178 (20%) duplicate (among LGs) contigs are also conflicting in the optical mapping. 
+
+This data was created with the script 'find_conflicting_contigs_OM.sh'. Output is saved in 'find_conflicting_contigs_OM.txt'.
+
+## Compare with P.axillaris caps markers (caps)
+Caps markers are markers which have been associated with a chromosome. Align caps to NGS genome and check which Contigs are listed there.
+
+Made database of P.exserta genome for blastn with `makeblastdb -in P.EXSERTA.contigs.v1.1.3.fasta -dbtype nucl -parse_seqids`. Copy sequence and name of marker into file query.fasta and then blast with `blastn -db P.EXSERTA.contigs.v1.1.3.fasta -query query.fasta -out results.out`. Grep "Ctg" in the results file with `grep Ctg results.out` and search the Ctg names in the genetic map linkage groups.
+
+```{r}
+caps <- read.table("by_hand/caps.csv", sep="\t", header=F)
+caps <- cbind(caps, as.numeric(substring(as.character(caps$V4), first=3)))
+names(caps)[6] <- "LGs"
+names(caps)[1] <- "Pax_Chr"
+ggparallel(list('LGs','Pax_Chr'), caps, sub="chr7 absent")
+if(dopdf == TRUE){ggsave("figures/caps_plot.pdf")}
+```
+
+Caps markers could not help to identify which LG is which chromosome. Either the Axillaris assembly or the genetic map is full of errors.
+
+
+## unique contigs
+```{bash}
+cat output_map/geneticmap_location.qtab | cut -f 1 | cut -f 1 -d '_' > temp.txt
+```
+
+
+```{r}
+names1 <- read.csv("temp.txt", skip=2, sep='\t')
+names <- read.csv("output_map/geneticmap_location.qtab", skip=2, sep='\t')
+names$X. <- names1
+l1c <- unique(names[which(names[,2] == "L.1"),1])
+l2c<- unique(names[which(names[,2] == "L.2"),1])
+l3c<- unique(names[which(names[,2] == "L.3"),1])
+l4c<- unique(names[which(names[,2] == "L.4"),1])
+l1c[which(l1c %in% l2c)]
+# plot
+venn.diagram(
+x = list(l1c , l2c , l3c),
+category.names = c("L.1" , "L.2 " , "L.3"),
+filename = 'figures/shared_contigs_among_LGs.png', imagetype="png" , height = 480 ,   width = 480 ,  resolution = 300, lwd = 2, lty = 'blank', fill = c('yellow', 'purple', 'green'), cex = 1, fontface = "bold", fontfamily = "sans", cat.cex = 0.6, cat.fontface = "bold", cat.default.pos = "outer", cat.pos = c(-27, 27, 135), cat.dist = c(0.055, 0.055, 0.085), cat.fontfamily = "sans", rotation = 1)
+```
+```{bash}
+rm temp.txt
+rm figures/*.log
+```
+
+## Finding sequence length covered by genetic map
+From ctgslen_names, the contig names which are unique can be taken and searched in the fasta.fai file. The second column indicates contig length in a fasta.fai file.
+
+```{r}
+# getting some information about unique contigs from newest genetic map
+ctgs <- read.table("output_map/ctglist.txt", header=T)
+names(ctgs) <- c("marker_name", "lg")
+
+# read out the duplicated contigs and the amount of time they occurr in linkage groups
+# ctgsl : list of name of contig and where it occurs (in which linkage group)
+# ctgslen : amount of contigs from different linkage groups per marker
+# ctgslen_names : names of the given contigs from vector above
+# counter : number of markers with contig uniquely from one linkage group
+ctgsl <- list() ; counter = 0 ; ctgslen <- c() ; ctgslen_names <- c() ; toiter <- unique(ctgs$marker_name)
+for(i in 1:length(toiter)){
+  n <- as.vector(ctgs[which(grepl(toiter[i], ctgs$marker_name)),2])
+  if(length(unique(n)) > 1){
+    ctgsl[[as.character(unique(toiter)[i])]] <- unique(n)
+    ctgslen<- c(ctgslen, length(unique(n)))
+    ctgslen_names <- c(ctgslen_names, as.character(unique(toiter)[i]))
+  } else {
+    counter = counter + 1
+  }
+}
+rm(toiter); rm(counter)
+
+#total number of unique contigs
+# length(unique(ctgs$marker_name)) # 590
+# 412 unique contigs + 178 contigs occurring more than once
+# length(ctgsl) # 178
+# ctgslen_names holds the names of the non-unique contigs
+
+labs = paste(as.character(as.data.frame(table(ctgslen))[,1]), " (", as.data.frame(table(ctgslen))[,2], ")", sep="")
+if(dopdf == TRUE){pdf("output_map/pie_non-unique-contigs.pdf")}
+pie(as.data.frame(table(ctgslen))$Freq, labels = labs,
+    main=paste("non-unique Contigs", "\n", "(from different linkage groups)"), col = brewer.pal(6, "Set1"))
+if(dopdf == TRUE){dev.off()}
+
+# ctgslen_names contains unique contig names
+#write(ctgslen_names, "names.txt", sep="\n")
+```
+ctgslen_names contains unique contig names
+
+### Finding length of contigs and sum.
+If a file names.txt contaings the unique contig names as list of names separated by "\n", it can be searched in the fasta.fai file. Both files must be placed in the same directory or in GBS_LepMap3 as indicated by the code.
+
+The data was created by hand, don't delete or run code.
+```{bash, eval=F}
+grep -f /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3/names.txt /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.fasta.fai | awk '{SUM += $2} END {print SUM}'
+cat a_P.EXSERTA.contigs.v1.1.3.fasta.fai | awk '{SUM += $2} END {print SUM}'
+```
+```{r,eval=F}
+lgbp<- readRDS("by_hand/bp_per_LG"); lgbp <- as.data.frame(lgbp); lgbp$bp <- as.numeric(as.character(lgbp$bp)); names(lgbp)[3] <- "Mbp"
+if(dopdf == TRUE){pdf("figures/length_of_LGs.pdf")}
+barplot(as.numeric(as.character(lgbp$Gbp[1:8])), ylim=c(0,130), ylab="Mbp", names.arg=lgbp$LG[1:8])
+if(dopdf == TRUE){dev.off()}
+```
+
+### how long are the duplicate contigs?
+If the duplicate contigs are the longest ones, a misassembly is more probable. At the same time, it is more likely to have more than one marker per contig if it is longer.
+```{r}
+# c_bp <- read.table("delete/test.txt") # the duplicate contigs
+# all_bp <- read.table("delete/test2.txt")
+# map_bp <- read.table("delete/test3.txt")
+# d <- rbind(cbind(c_bp, "type" = "dup"),  cbind(map_bp, "type" = "mapped"), cbind( all_bp, "type" = "all"))
+# colnames(d)[1] <- "len_bp"
+# d$V1 <- d$len_bp / 1000000
+# saveRDS(d, "external_QC_raw/contig_lens_violin")
+d <- readRDS("by_hand/contig_lens_violin")
+ggplot(d, aes(factor(type), V1)) +
+  geom_jitter(height = 0, colour = "grey50", size=0.2) + geom_violin(aes(fill = type), draw_quantiles = 0.5) + labs(x = "contig lengths", y="lengths", title = "Contig lengths [Mbp] of duplicates, mapped and all", subtitle = paste("Median : dup = ", median(d[d$type == "dup", "V1"]), " mapped = ", median(d[d$type == "mapped", "V1"]), "all = ", median(d[d$type == "all", "V1"])) , caption = "dup : duplicate contigs, mapped : contigs in the genetic map, all = contigs from p.exserta assembly")
+if(dopdf == TRUE){ggsave("figures/contig_lengths.pdf")}
+```
+It seems like the contig length does not differ among duplicate contigs and all contigs in the map. Neither is there a very long contig influencing the median a lot, as can be observed by the point height in the plot (and second, because median is not impacted much by an outlier). Note : when comparing points, the x axis value within a group has no influence (only graphical purposes) so only the y axis shows length of the given contig.
+
+```{r}
+# histogram of contig lengths [Mbp]
+ggplot(d, aes(x=V1, fill=type)) + geom_histogram(aes(y=..density..), alpha=0.7, binwidth=0.2) + 
+  scale_fill_brewer(palette="Set1") + 
+  labs(x="Contig length [Mbp]", y="Density", title="Contig lengths")
+if(dopdf == TRUE){ggsave("figures/compare_dup_contigs.pdf")}
+```
+# read the sequences of the markers
+For each marker, copy out some sequence information. See script "find_marker_sequences.Rmd"
+
+# Outlook
+Further process the file with [ALLMAPS](https://github.com/tanghaibao/jcvi/wiki/ALLMAPS%3A-How-to-use-different-types-of-genomic-maps)

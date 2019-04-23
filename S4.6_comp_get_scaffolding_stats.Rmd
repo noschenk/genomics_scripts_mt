@@ -1,0 +1,158 @@
+---
+title: "stats of genomes"
+author: 'Noëlle Schenk'
+date: "August 17, 2018"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+# get assembly stats
+This script calculates some stats of a genome in .fasta format.
+
+```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, echo = F}
+library("dplyr")
+require(RColorBrewer)
+# display.brewer.all()
+# rand.data <- replicate(8,rnorm(100,100,sd=1.5))
+# boxplot(rand.data,col=brewer.pal(8,"Set3"))
+brcol <- brewer.pal(7, "Dark2")
+```
+
+Calculate individual contig lengths from fasta file
+```{bash, eval=FALSE}
+# nice sctipt, found at http://www.danielecook.com/generate-fasta-sequence-lengths/ - thank you Daniele Cook!
+# ${genome_loc} is path-to .fasta file (incl. name), ${genome_name} is name without path
+cat ${genome_loc} | awk '$0 ~ ">" {print c; c=0;printf substr($0,2,100) "\t"; } $0 !~ ">" {c+=length($0);} END { print c; }' > ${genome_name}_sizes.txt
+```
+```{r}
+# store path to sizes_txt
+Peexv113 <- "/home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3_sizes.txt"
+PeexOM <- "/home/exserta/Documents/master_project_noelle/data/optical_mapping_raw/P.exserta.opticalmap.v1.fasta.sizes"
+PeexOM_kmm2_guo1 <- "/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug17_kmm2_guo1/merged.fasta.sizes"
+PeexOM_kmm1_guo2 <- "/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug21_guo2_kmm1/merged.fasta.sizes" 
+PeexOM_kmm_guo <- "/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug9_kmm_guo/merged.fasta.sizes"
+Peexv20 <- "/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.fasta.sizes"
+
+# CHOOSE YOUR GENOME
+sizes_loc <- Peexv20
+assembly_name <- "Peexv20"
+
+# initialize stats  list
+assemblystats <- list()
+# number of chromosomes of organism
+nchr <- 7
+assemblystats[["assemblyname"]] <- assembly_name
+```
+
+## Calc stats
+Load contig lengths file and start calculating stats
+```{r}
+lensFile <- read.table(sizes_loc, col.names = c("contig", "bplength"))
+lensFile[,"Mbplength"] <- lensFile$bplength / 1000000
+# order by length
+lensFile <- arrange(lensFile, desc(Mbplength))
+assemblystats["total_lengthMbp"] <- sum(lensFile$Mbplength)
+assemblystats["ctgs_gt_10kb"] <- length(which(lensFile$Mbplength > 0.01))
+assemblystats["number_of_contigs"] <- nrow(lensFile)
+assemblystats["median_ctg_lengthMb"] <- median(lensFile$Mbplength)
+assemblystats["longest_ctg"] <- max(lensFile$Mbplength)
+```
+### count number of ambiguous bases
+```{bash, eval=F}
+cat /home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/ALLMAPS/aug21_guo2_kmm1/merged.fasta | awk -F"N" '{print NF-1}' | paste -sd+ | bc
+```
+Gives number in [bp], divide by 1000000 to get [Mbp].
+
+### calculate N50 and L50
+keep adding up contigs (first the longest, then the second longest, ...) until you reach 50\% of the genome length. That means, add up contigs until the sum is near to `r lensFile$tot_size/2#772.4826`
+```{r}
+# calc cumulative sum
+lensFile["cumsumMb"] <- cumsum(lensFile$Mbplength)
+# find nearest value to 50% of genome length
+assemblystats["l50"] <- which.min(abs(lensFile$cumsumMb - assemblystats$total_lengthMbp / 2))
+assemblystats["n50"] <- lensFile$Mbplength[assemblystats[["l50"]]]
+```
+### calculate CN50 and CL50
+```{r}
+assemblystats[["cl50"]] <- which.min(abs(lensFile$cumsumMb - assemblystats$total_lengthMbp / nchr / 2))
+assemblystats[["cn50"]] <- lensFile$Mbplength[assemblystats[["cl50"]]]
+```
+## save stats
+```{r, eval=F}
+assemblystats[["lensFile"]] <- lensFile
+saveRDS(assemblystats, file=paste("assembly_stats_", assembly_name, sep=""))
+```
+
+
+## plot cumul lengths
+```{r}
+plot(lensFile$cumsumMb / assemblystats$total_lengthMbp, lensFile$Mbplength, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main=paste("Contig sizes ", assembly_name, sep=""), col=brcol[2], pch=16)
+```
+
+# Compare different assemblies
+plot contig sizes
+```{r}
+Peexv113 <- readRDS(file = "assembly_stats_Peexv113")
+PeexOM <- readRDS(file="assembly_stats_PeexOM")
+PeexOM_kmm2_guo1 <- readRDS(file= "assembly_stats_PeexOM_kmm2_guo1")
+PeexOM_kmm1_guo2 <- readRDS(file = "assembly_stats_PeexOM_kmm1_guo2")
+PeexOM_kmm_guo <- readRDS(file = "assembly_stats_PeexOM_kmm_guo")
+Peexv20 <- readRDS(file= "assembly_stats_Peexv20")
+```
+
+```{r}
+plot(Peexv113$lensFile$cumsumMb / Peexv113$total_lengthMbp, Peexv113$lensFile$Mbplength, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(0,250), col = brcol[1], pch=16)
+points(PeexOM$lensFile$cumsumMb / PeexOM$total_lengthMbp, PeexOM$lensFile$Mbplength, col=brcol[2], pch=16)
+points(PeexOM_kmm2_guo1$lensFile$cumsumMb / PeexOM_kmm2_guo1$total_lengthMbp, PeexOM_kmm2_guo1$lensFile$Mbplength, col=brcol[3], pch=16)
+points(PeexOM_kmm1_guo2$lensFile$cumsumMb / PeexOM_kmm1_guo2$total_lengthMbp, PeexOM_kmm1_guo2$lensFile$Mbplength, col=brcol[4], pch=16)
+points(PeexOM_kmm_guo$lensFile$cumsumMb / PeexOM_kmm_guo$total_lengthMbp, PeexOM_kmm_guo$lensFile$Mbplength, col=brcol[5], pch=16)
+points(Peexv20$lensFile$cumsumMb / Peexv20$total_lengthMbp, Peexv20$lensFile$Mbplength, col=brcol[6], pch=16)
+legend(0.7, 250, legend=c("Peex v.1.1.3", "PeexOM", "PeexOM kmm2 guo1", "PeexOM kmm1 guo2", "PeexOM kmm guo", "Peex v.2.0"), col=brcol[1:6], pch=16, cex=0.8)
+```
+
+```{r}
+# plot all assemblies
+pdf("scaffold_sizes_all.pdf", paper="a4r")
+plot(Peexv113$lensFile$cumsumMb / Peexv113$total_lengthMbp, Peexv113$lensFile$Mbplength, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(0,250), col = brcol[1], pch=16)
+points(PeexOM$lensFile$cumsumMb / PeexOM$total_lengthMbp, PeexOM$lensFile$Mbplength, col=brcol[2], pch=16)
+points(PeexOM_kmm2_guo1$lensFile$cumsumMb / PeexOM_kmm2_guo1$total_lengthMbp, PeexOM_kmm2_guo1$lensFile$Mbplength, col=brcol[3], pch=16)
+points(PeexOM_kmm1_guo2$lensFile$cumsumMb / PeexOM_kmm1_guo2$total_lengthMbp, PeexOM_kmm1_guo2$lensFile$Mbplength, col=brcol[4], pch=16)
+points(PeexOM_kmm_guo$lensFile$cumsumMb / PeexOM_kmm_guo$total_lengthMbp, PeexOM_kmm_guo$lensFile$Mbplength, col=brcol[5], pch=16)
+points(Peexv20$lensFile$cumsumMb / Peexv20$total_lengthMbp, Peexv20$lensFile$Mbplength, col=brcol[6], pch=16)
+legend(0.7, 250, legend=c("Peex v.1.1.3", "PeexOM", "PeexOM kmm2 guo1", "PeexOM kmm1 guo2", "PeexOM kmm guo", "Peex v.2.0"), col=brcol[1:6], pch=16, cex=0.8)
+
+plot(Peexv113$lensFile$cumsumMb / Peexv113$total_lengthMbp, Peexv113$lensFile$Mbplength, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(0,20), col = brcol[1], pch=16)
+points(PeexOM$lensFile$cumsumMb / PeexOM$total_lengthMbp, PeexOM$lensFile$Mbplength, col=brcol[2], pch=16)
+legend(0.7, 250, legend=c("Peex v.1.1.3", "PeexOM"), col=brcol[1:2], cex=0.8, pch=16)
+
+plot(1, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(130,225), xlim=c(0,1), col = "white")
+points(PeexOM_kmm2_guo1$lensFile$cumsumMb / PeexOM_kmm2_guo1$total_lengthMbp, PeexOM_kmm2_guo1$lensFile$Mbplength, col=brcol[3], pch=16)
+points(PeexOM_kmm1_guo2$lensFile$cumsumMb / PeexOM_kmm1_guo2$total_lengthMbp, PeexOM_kmm1_guo2$lensFile$Mbplength, col=brcol[4], pch=16)
+points(PeexOM_kmm_guo$lensFile$cumsumMb / PeexOM_kmm_guo$total_lengthMbp, PeexOM_kmm_guo$lensFile$Mbplength, col=brcol[5], pch=16)
+points(Peexv20$lensFile$cumsumMb / Peexv20$total_lengthMbp, Peexv20$lensFile$Mbplength, col=brcol[6], pch=16)
+legend(0.7, 230, legend=c("PeexOM kmm2 guo1", "PeexOM kmm1 guo2", "PeexOM kmm guo", "Peex v.2.0"), col=brcol[3:6], cex=0.8, pch=16)
+dev.off()
+```
+```{r}
+# plot "old" assemblies only
+pdf("scaffold_sizes_old.pdf", paper="a4r")
+plot(Peexv113$lensFile$cumsumMb / Peexv113$total_lengthMbp, Peexv113$lensFile$Mbplength, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(0,20), col = brcol[1], pch=16)
+points(PeexOM$lensFile$cumsumMb / PeexOM$total_lengthMbp, PeexOM$lensFile$Mbplength, col=brcol[2], pch=16)
+legend(0.7, 250, legend=c("Peex v.1.1.3", "PeexOM"), col=brcol[1:2], cex=0.8, pch=16)
+dev.off()
+```
+```{r}
+# plot "new assemblies only"
+pdf("scaffold_sizes_new.pdf", paper="a4r")
+plot(1, ylab = "contig length [Mbp]", xlab = "cumulative genome length", main="Contig sizes", ylim=c(130,225), xlim=c(0,1), col = "white")
+points(PeexOM_kmm2_guo1$lensFile$cumsumMb / PeexOM_kmm2_guo1$total_lengthMbp, PeexOM_kmm2_guo1$lensFile$Mbplength, col=brcol[3], pch=16)
+points(PeexOM_kmm1_guo2$lensFile$cumsumMb / PeexOM_kmm1_guo2$total_lengthMbp, PeexOM_kmm1_guo2$lensFile$Mbplength, col=brcol[4], pch=16)
+points(PeexOM_kmm_guo$lensFile$cumsumMb / PeexOM_kmm_guo$total_lengthMbp, PeexOM_kmm_guo$lensFile$Mbplength, col=brcol[5], pch=16)
+points(Peexv20$lensFile$cumsumMb / Peexv20$total_lengthMbp, Peexv20$lensFile$Mbplength, col=brcol[6], pch=16)
+legend(0.7, 230, legend=c("PeexOM kmm2 guo1", "PeexOM kmm1 guo2", "PeexOM kmm guo", "Peex v.2.0"), col=brcol[3:6], cex=0.8, pch=16)
+dev.off()
+```

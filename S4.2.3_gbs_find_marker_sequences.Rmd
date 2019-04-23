@@ -1,0 +1,81 @@
+---
+title: "find_marker_sequences.r"
+author: 'Noëlle Schenk'
+date: "July 3, 2018"
+output: html_document
+---
+```{r}
+setwd("/home/exserta/Documents/master_project_noelle/projects/BioNano-exserta/GBS_LepMAP3")
+```
+
+```{r}
+map <- read.csv("output_map/final_full_map.csv")
+markernames <- map[,1] ; markernames <- as.character(markernames)
+b <- unlist(strsplit(markernames, split = "_"))
+inds <- grep("Peex", b)
+inds2 <- inds + 1
+mastertable <- cbind("Ctgs" = b[inds], "loc" = b[inds2])
+mastertable <- as.data.frame(mastertable)
+mastertable[,"loc"] <- as.numeric(mastertable[,"loc"])
+rm(inds); rm(inds2); rm(markernames); rm(b); gc() 
+```
+Saving starting and ending position of the piece of sequence which is read out of the P.exserta genome.
+
+The parameter halflength specifies the length of the sequence left and right of the marker position. If the marker is closer to one end of the contig than halflength, it is shifted towards the positive side. The sequence will start at 0 contig position and end at 40, but the SNP marker will no longer be in the middle but shifted to a new location which is saved in snppos.
+```{r}
+halflength <- 100
+mastertable[, "snppos"] <- halflength + 1
+mastertable[,"locstart"] <- mastertable[,"loc"] - halflength
+mastertable[,"locend"] <- mastertable[,"loc"] + halflength + 1
+# starting position can never be smaller than 0. Convert all negative values to 0
+# which(mastertable[, "locstart"] < 0)
+mastertable[which(mastertable[, "locstart"] < 1), "locend"] <- 1 + halflength*2 + 1
+mastertable[which(mastertable[, "locstart"] < 1), "snppos"] <- mastertable[which(mastertable[, "locstart"] < 0), "snppos"] - mastertable[which(mastertable[, "locstart"] < 1), "locstart"]
+mastertable[which(mastertable[, "locstart"] < 1), "locstart"] <- 1
+# control if length of snp is always halflength*2
+if(length(which(mastertable[,"locend"] - mastertable[,"locstart"] != halflength*2+1)) == 0){print("same lengths of all sequences")}
+```
+prepare input for bash script
+```{r}
+bashinput <- paste("samtools faidx /home/exserta/Documents/master_project_noelle/data/exserta_genome_NGS/P.EXSERTA.contigs.v1.1.3.fasta", paste(paste(mastertable[,1], mastertable[,"locstart"], sep = ":"), mastertable[,"locend"], sep="-"), ">> marker_seqs.fasta",sep=" ")
+write(bashinput, "find_marker_sequences.sh")
+```
+Run bash script which creates a new fasta file containing sequences for all markers.
+```{bash}
+chmod u+x find_marker_sequences.sh
+./find_marker_sequences.sh
+cat marker_seqs.fasta | awk '/^>/ {printf("\n%s\n",$0);next; } { printf("%s",$0);}  END {printf("\n");}' > marker_seqsn.fasta
+rm marker_seqs.fasta
+```
+
+```{r}
+seqs <- read.table("marker_seqsn.fasta")
+seqs <- as.vector(seqs[,1])
+inds <- grep("Peex", seqs)
+inds2 <- seq(1:length(seqs))[!seq(1:length(seqs)) %in% inds]
+ctgs <- seqs[inds] # are the Contig name and locations
+sequs <- seqs[inds2] # is the DNA sequence
+```
+Merge into mastertable all the information.
+```{r}
+mastertable[,"seq"] <- sequs
+mastertable[,"trash"] <- ctgs
+# test if the contig names are the same in each row
+mastertable[, "test"] <- apply(mastertable, 1, function(x) grepl(x["Ctgs"], x["trash"]))
+# if contig names are the same, the columns "trash" and "test" are deleted
+if(sum(!mastertable[,"test"]) == 0){mastertable$trash <- NULL; mastertable$test <- NULL}
+```
+
+Create a mastertable containing all information including the sequence and info from "output_map/final_full_map.csv"
+```{r}
+master <- cbind(map, mastertable)
+#  master[, "test"] <- apply(master, 1, function(x) grepl(x["Ctgs"], x["marker_name"])) ; sum(!master$test)
+write.csv(master, "output_map/mastertable_map.csv")
+```
+Lowercase letters correspond to repeats, uppercase are non-repeated sequences. Ns correspond to gaps of (approximately) known lengths.
+
+Remove unnecessary files "marker_seqs.fasta" (information already in output_map/mastertable_map.csv), "find_marker_sequences.sh" (only its output is saved)
+```{bash}
+rm find_marker_sequences.sh
+rm marker_seqsn.fasta
+```

@@ -1,0 +1,278 @@
+---
+title: "MCscan_workflow"
+author: 'Noëlle Schenk'
+date: "August 22, 2018"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Follow instructions at [MCscan wiki](https://github.com/tanghaibao/jcvi/wiki/MCscan-%28Python-version%29). Downloaded dependencies. PATH=. Make sure lastal and lastdb work, maybe test them within the virtualenv as shown below.
+
+## preparing files
+
+Activate virtualenv
+```{bash, eval=F}
+source activate spassmitallmaps
+# test if lastal is installed properly
+lastal
+```
+Get data for *A.thaliana* and *S. lycopersicum*, Convert the GFF to BED file and rename them.
+
+.gff file of new genome is ´/home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.gff3´. 
+```{bash, eval=F}
+python -m jcvi.apps.fetch phytozome Athaliana,Slycopersicum
+python -m jcvi.formats.gff bed --type=mRNA --key=Name Slycopersicum_225_gene.gff3.gz -o tomato.bed
+python -m jcvi.formats.gff bed --type=mRNA --key=Name Athaliana_167_gene.gff3.gz -o arabidopsis.bed
+python -m jcvi.formats.gff bed --type=mRNA --key=Name /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.gff3 -o pexserta.bed
+# (if wanted) clean headers to remove description fields from Phytozome FASTA files.
+python -m jcvi.formats.fasta format --sep="|" Slycopersicum_225_cds.fa.gz tomato.cds
+python -m jcvi.formats.fasta format --sep="|" Athaliana_167_cds.fa.gz arabidopsis.cds
+```
+tomato : 34727 features, arabidopsis : 35386 features, pexserta : 38015 features in .gff files. , potato : 51472 features
+
+### get cds of p.exserta
+from .gff file
+```{bash, eval=F}
+bedtools getfasta -name -fi /home/exserta/Documents/master_project_noelle/data/P.EXSERTA.v.2.0/P.exserta.v.2.0.fasta -bed pexserta.bed -fo pexserta.cds
+```
+
+## Pairwise syntheny search
+
+### P.exserta vs. tomato
+```{bash, eval=F}
+python -m jcvi.compara.catalog ortholog pexserta tomato
+```
+ERROR :
+```
+17:05:47 [synteny] Assuming --qbed=pexserta.bed --sbed=tomato.bed
+17:05:47 [base] Load file `pexserta.bed`
+17:05:49 [base] Load file `tomato.bed`
+17:05:51 [blastfilter] Load BLAST file `pexserta.tomato.last` (total 1007498 lines)
+17:05:51 [base] Load file `pexserta.tomato.last`
+17:06:09 [blastfilter] Solyc07g065630.2 not in tomato.bed
+17:06:09 [blastfilter] Solyc02g014190.2 not in tomato.bed
+...
+17:06:09 [blastfilter] Solyc03g119270.1 not in tomato.bed
+17:06:09 [blastfilter] Solyc04g064940.2 not in tomato.bed
+17:06:09 [blastfilter] too many warnings.. suppressed
+17:06:13 [blastfilter] running the cscore filter (cscore>=0.70) ..
+17:06:13 [blastfilter] after filter (0->0) ..
+17:06:13 [blastfilter] running the local dups filter (tandem_Nmax=10) ..
+17:06:13 [blastfilter] after filter (0->0) ..
+17:06:13 [synteny] Assuming --qbed=pexserta.bed --sbed=tomato.bed
+17:06:13 [base] Load file `pexserta.bed`
+17:06:14 [base] Load file `tomato.bed`
+17:06:14 [base] Load file `pexserta.tomato.last.filtered`
+17:06:14 [synteny] A total of 0 BLAST imported from `pexserta.tomato.last.filtered`.
+17:06:14 [synteny] Chaining distance = 20
+17:06:14 [base] Load file `pexserta.tomato.anchors`
+17:06:14 [synteny] A total of 0 anchor was found. Aborted.
+Traceback (most recent call last):
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/runpy.py", line 174, in _run_module_as_main
+    "__main__", fname, loader, pkg_name)
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/runpy.py", line 72, in _run_code
+    exec code in run_globals
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/compara/catalog.py", line 841, in <module>
+    main()
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/compara/catalog.py", line 73, in main
+    p.dispatch(globals())
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/apps/base.py", line 96, in dispatch
+    globals[action](sys.argv[2:])
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/compara/catalog.py", line 664, in ortholog
+    "--liftover={0}".format(last)])
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/compara/synteny.py", line 1483, in scan
+    summary([anchor_file])
+  File "/home/exserta/anaconda2/envs/spassmitallmaps/lib/python2.7/site-packages/jcvi/compara/synteny.py", line 1050, in summary
+    raise ValueError("A total of 0 anchor was found. Aborted.")
+ValueError: A total of 0 anchor was found. Aborted.
+```
+## Confustion with name endings .1
+Irgendwie schafft es das Programm nicht, nach gen2.1 zu suchen, sondern sucht nach gen2, welches es dann nicht findet. Idee: namen ändern?
+```
+cat tomato.bed | sed 's/\.1\t/\t/g' > tom.bed
+mv tom.bed tomato.bed
+cat pexserta.tomato.last | sed 's/\.1\t/\t/g' > p.t.last
+mv p.t.last pexserta.tomato.last
+cat tomato.cds | sed -r 's/\.1$//g' > tom.cds
+mv tom.cds tomato.cds
+```
+```
+08:50:24 [blastfilter] Solyc07g008630 not in tomato.bed
+08:50:24 [blastfilter] Solyc02g089970 not in tomato.bed
+08:50:24 [blastfilter] Solyc09g091400 not in tomato.bed
+08:50:24 [blastfilter] Solyc07g008620 not in tomato.bed
+08:50:24 [blastfilter] Solyc02g068560 not in tomato.bed
+08:50:24 [blastfilter] Solyc07g007140 not in tomato.bed
+08:50:24 [blastfilter] Solyc03g119270 not in tomato.bed
+08:50:24 [blastfilter] Solyc04g064940 not in tomato.bed
+```
+--> no gene names with . (dot) character allowed.
+
+```
+cat tomato.bed | sed -r 's/\.[0-9]\t/\t/g' > tom.bed
+mv tom.bed tomato.bed
+cat pexserta.tomato.last | sed -r 's/\.[0-9]\t/\t/g' > tom.bed
+mv tom.bed pexserta.tomato.last
+cat tomato.cds | sed -r 's/\.[0-9]\t/\t/g' > tom.bed
+mv tom.bed tomato.cds
+```
+```
+09:03:45 [base] Figure saved to `pexserta.tomato.pdf` (720px x 720px)
+```
+
+#### Pairwise synteny visualization
+```{bash, eval=F}
+# pdf dotplot is generated by command above
+python -m jcvi.compara.synteny depth --histogram pexserta.tomato.anchors
+```
+
+Get the 1:1 pattern (1:1 orthologous region) --cscore=.99. "C-score is defined by the ratio of LAST hit to the best BLAST hits to either the query and hit. A C-score cutoff of .99 effectively filters the LAST hit to contain reciprocal best hit (RBH))"
+```{bash, eval=F}
+rm pexserta.tomato.last.filtered 
+$ python -m jcvi.compara.catalog ortholog pexserta tomato --cscore=.99
+$ python -m jcvi.graphics.dotplot pexserta.tomato.anchors
+```
+
+#### Macrosyntheny visualization
+Prepare seqids file
+```{bash, eval=F}
+cat pexserta.bed | grep 'chr' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/chrchr7,/chrchr7\n/g' > seqids
+cat tomato.bed | grep 'ch' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/ch12,/ch12/g' >> seqids
+```
+
+Second is the layout file, which tells the plotter where to draw what. The whole canvas is 0-1 on x-axis and 0-1 on y-axis. First three columns specify the position of the track. Then rotation, color, label, vertical alignment (va), and then the genome BED file. Track 0 is now grape, track 1 is now peach. The next stanza specify what edges to draw between the tracks. e, 0, 1 asks to draw edges between track 0 and 1, using information from the .simple file.
+
+```
+# y, xstart, xend, rotation, color, label, va,  bed
+ .6,     .2,    .8,       4,  red , P.exserta, top, pexserta.bed
+ .4,     .2,    .8,       -4, green  , S.lycopersicum, bottom, tomato.bed
+# edges
+e, 0, 1, pexserta.tomato.anchors.simple
+```
+Generate .simple file and plot
+```{bash, eval=F}
+python -m jcvi.compara.synteny screen --minspan=30 --simple pexserta.tomato.anchors pexserta.tomato.anchors.new
+python -m jcvi.graphics.karyotype seqids layout
+```
+minspan: remove blocks with less span than this
+
+### P.exserta vs. arabidopsis
+
+### P.exserta vs. P.axillaris
+Prepare input files for P. axillaris
+```{bash, eval=F}
+python -m jcvi.formats.gff bed --type=mRNA --key=Name /home/exserta/Documents/master_project_noelle/data/axillaris_genome_NGS/Peaxi162annotation_v4.gff -o peaxi.bed
+bedtools getfasta -name -fi /home/exserta/Documents/master_project_noelle/data/axillaris_genome_NGS/Peaxi_genome_v1.6.2.scaffolds.fasta -bed peaxi.bed -fo peaxi.cds
+
+python -m jcvi.compara.catalog ortholog pexserta peaxi
+```
+
+ERROR:
+```
+Load BLAST file `pexserta.peaxi.last` (total 8798966 lines)
+09:56:15 [base] Load file `pexserta.peaxi.last`
+09:56:48 [blastfilter] Peaxi162Scf00226g00823 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00130g00325 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00435g01013 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00068g00019 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00256g00817 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00066g00223 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00595g00112 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00290g00313 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00290g00313 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00290g00313 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00045g02134 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00937g00119 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00765g00049 not in peaxi.bed
+09:56:48 [blastfilter] Peaxi162Scf00453g00029 not in peaxi.bed
+...
+09:56:48 [blastfilter] Peaxi162Scf00347g00326 not in peaxi.bed
+09:56:48 [blastfilter] too many warnings.. suppressed
+09:57:20 [blastfilter] running the cscore filter (cscore>=0.70) ..
+09:57:20 [blastfilter] after filter (0->0) ..
+09:57:20 [blastfilter] running the local dups filter (tandem_Nmax=10) ..
+09:57:20 [blastfilter] after filter (0->0) ..
+09:57:22 [synteny] Assuming --qbed=pexserta.bed --sbed=peaxi.bed
+09:57:22 [base] Load file `pexserta.bed`
+09:57:23 [base] Load file `peaxi.bed`
+09:57:23 [base] Load file `pexserta.peaxi.last.filtered`
+09:57:23 [synteny] A total of 0 BLAST imported from `pexserta.peaxi.last.filtered`.
+09:57:23 [synteny] Chaining distance = 20
+09:57:23 [base] Load file `pexserta.peaxi.anchors`
+09:57:23 [synteny] A total of 0 anchor was found. Aborted.
+```
+
+Remove .1 genes.
+```{bash, eval=F}
+cat peaxi.bed | sed 's/\.1\t/\t/g' > px.bed
+mv px.bed peaxi.bed
+cat peaxi.cds | sed -r 's/\.1$//g' > px.bla
+mv px.bla peaxi.cds
+cat pexserta.peaxi.last | sed 's/\.1\t/\t/g' > px.bla
+mv px.bla pexserta.peaxi.last
+```
+There are some .2 genes
+
+```{bash, eval=F}
+python -m jcvi.compara.synteny depth --histogram pexserta.tomato.anchors
+```
+
+
+Prepare seqid file
+```{bash, eval=F}
+cat pexserta.bed | grep 'chr' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/chrchr7,/chrchr7\n/g' > seqids
+# inserted peaxi contigs by hand, contigs > 1 Mbp are included
+```
+
+layout
+```
+# y, xstart, xend, rotation, color, label, va,  bed
+ .6,     .2,    .8,       1,  red , P.exserta, top, pexserta.bed
+ .4,     .2,    .8,       1, green  , P.axillaris, bottom, peaxi.bed
+# edges
+e, 0, 1, pexserta.peaxi.anchors.simple
+```
+
+```{bash, eval=F}
+python -m jcvi.compara.synteny screen --minspan=30 --simple pexserta.peaxi.anchors pexserta.peaxi.anchors.new
+python -m jcvi.compara.synteny depth --histogram pexserta.peaxi.anchors
+python -m jcvi.graphics.karyotype seqids layout
+```
+
+### P.exserta vs. tomato vs. arabidopsis
+```{bash, eval=F}
+cat arabidopsis.bed | sed -r 's/\.[0-9]\t/\t/g' > ara.bla
+mv ara.bla arabidopsis.bed
+cat arabidopsis.cds | sed -r 's/\.[0-9]$//g' > ara.bla
+mv ara.bla arabidopsis.cds
+cat pexserta.arabidopsis.last | sed -r 's/\.[0-9]\t/\t/g' > ara.bla
+mv ara.bla pexserta.arabidopsis.last
+python -m jcvi.compara.catalog ortholog pexserta arabidopsis
+python -m jcvi.compara.synteny screen --minspan=30 --simple pexserta.arabidopsis.anchors pexserta.arabidopsis.anchors.new
+```
+layout file
+```
+# y, xstart, xend, rotation, color, label, va,  bed
+ .7,     .1,    .8,      15,  green , S.lycopersicum, top, tomato.bed
+ .5,     .1,    .8,       0, red , P.exserta, top, pexserta.bed
+ .3,     .1,    .8,     -15, orange  , A.thaliana, bottom, arabidopsis.bed
+# edges
+e, 0, 1, pexserta.tomato.anchors.simple
+e, 1, 2, pexserta.arabidopsis.anchors.simple
+```
+took out by hand ChrM and ChrC (caused error).
+
+seqids file, need to match the order in layout (tomato - pexserta - arabidopsis)
+```{bash, eval=F}
+cat tomato.bed | grep 'ch' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/ch12,/ch12\n/g' > seqids
+cat pexserta.bed | grep 'chr' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/chrchr7,/chrchr7\n/g' >> seqids
+cat arabidopsis.bed | grep 'Chr' | cut -f 1 | sort | uniq | tr '\n' ',' | sed -r 's/ChrM,/ChrM/g' >> seqids
+
+```
+```{bash, eval=F}
+python -m jcvi.graphics.karyotype seqids layout
+```
